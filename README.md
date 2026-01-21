@@ -27,7 +27,7 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
    ./acore.sh compiler
 
 5) Apply SQL (optional test data only):
-   sql/world/base/900_seed_bmp_test_pets.sql
+   sql/world/base/optional_seed_bmp_test_pets.sql
 
 ## Notes
 - This module intentionally does not modify stable limits
@@ -42,7 +42,7 @@ This module requires the BeastMasterPlus addon on the client.
    Interface/AddOns/BeastmasterPlus
 
    The folder is provided in this module:
-   modules/mod-beastmasterplus/BeastmasterPlus
+   modules/mod-beastmasterplus/data/BeastmasterPlus
 
 2) Ensure the addon files exist:
    - BeastmasterPlus.toc
@@ -55,3 +55,24 @@ This module requires the BeastMasterPlus addon on the client.
 - The server module will load without the addon, but no UI or interaction is possible
 - All user interaction is addon UI only
 - Communication uses CHAT_MSG_ADDON with prefix BMP
+
+## Layout
+
+- src/  
+  Server-side module source code
+
+- data/BeastmasterPlus/  
+  Required client addon (copy to Interface/AddOns/BeastmasterPlus)
+
+- conf/  
+  Module configuration templates
+
+- sql/world/base/optional_seed_bmp_test_pets.sql  
+  Optional test data only (not required for normal operation)
+
+- tools/  
+  Developer and audit utilities
+
+- patches/  
+  Minimal required core hook (LANG_ADDON routing)
+

@@ -1,0 +1,11 @@
+###############################################################################
+# BeastMasterPlus configuration
+###############################################################################
+
+#
+# Allow multiple unslotted hunter pets to exist simultaneously.
+# This bypasses the normal stable slot restriction.
+#
+# Default: 0 (disabled)
+#
+BeastMasterPlus.AllowMultipleUnslottedPets = 0

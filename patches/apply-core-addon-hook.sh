@@ -10,7 +10,7 @@ if ! [ -f "$CORE_FILE" ]; then
   exit 1
 fi
 
-if grep -q 'AddonMessageRouter::Handle' "$CORE_FILE"; then
+if grep -Eq "AddonMessageRouter::Handle" "$CORE_FILE"; then
   echo "AddonMessageRouter hook already present. Skipping."
   exit 0
 fi

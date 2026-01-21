@@ -1,0 +1,22 @@
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+index 9c56f1b93a7..2dca32b9c0a 100644
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -20,6 +20,7 @@
+ #include "CellImpl.h"
+ #include "ChannelMgr.h"
+ #include "Chat.h"
++#include "BmpAddonMessageRouter.h"
+ #include "ChatPackets.h"
+ #include "Common.h"
+ #include "GameTime.h"
+@@ -285,6 +286,8 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recvData)
+         if (lang == LANG_ADDON)
+         {
+             if (AddonChannelCommandHandler(this).ParseCommands(msg.c_str()))
+                 return;
++            if (AddonMessageRouter::Handle(this, msg))
++                return;
+         }
+         else
+         {

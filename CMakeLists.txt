@@ -1,0 +1,7 @@
+CU_SET_PATH("CMAKE_MOD_BEASTMASTERPLUS_DIR" "${CMAKE_CURRENT_LIST_DIR}")
+
+AC_ADD_SCRIPT("${CMAKE_MOD_BEASTMASTERPLUS_DIR}/src/BeastMasterPlus.cpp"
+             "${CMAKE_MOD_BEASTMASTERPLUS_DIR}/src/loader.cpp"
+             "${CMAKE_MOD_BEASTMASTERPLUS_DIR}/src/BmpAddonMessageRouter.cpp")
+
+AC_ADD_SCRIPT_LOADER("BeastMasterPlus" "${CMAKE_MOD_BEASTMASTERPLUS_DIR}/src/loader.h")

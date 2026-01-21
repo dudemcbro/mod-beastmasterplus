@@ -1,0 +1,125 @@
+diff --git a/src/server/database/Database/Implementation/CharacterDatabase.cpp b/src/server/database/Database/Implementation/CharacterDatabase.cpp
+index 1b8650b49..37af239ad 100644
+--- a/src/server/database/Database/Implementation/CharacterDatabase.cpp
++++ b/src/server/database/Database/Implementation/CharacterDatabase.cpp
+@@ -569,8 +569,13 @@ void CharacterDatabaseConnection::DoPrepareStatements()
+     PrepareStatement(CHAR_DEL_CHAR_PET_BY_OWNER, "DELETE FROM character_pet WHERE owner = ?", CONNECTION_ASYNC);
+     PrepareStatement(CHAR_UPD_CHAR_PET_NAME, "UPDATE character_pet SET name = ?, renamed = 1 WHERE owner = ? AND id = ?", CONNECTION_ASYNC);
+     PrepareStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID, "UPDATE character_pet SET slot = ? WHERE owner = ? AND id = ?", CONNECTION_ASYNC);
++    PrepareStatement(CHAR_UPD_CHAR_PET_NO_SLOT,
++        "UPDATE character_pet SET entry = ?, modelid = ?, CreatedBySpell = ?, PetType = ?, level = ?, exp = ?, Reactstate = ?, name = ?, renamed = ?, curhealth = ?, curmana = ?, curhappiness = ?, savetime = ?, abdata = ? "
++        "WHERE id = ? AND owner = ?",
++        CONNECTION_ASYNC);
+     PrepareStatement(CHAR_DEL_CHAR_PET_BY_ID, "DELETE FROM character_pet WHERE id = ?", CONNECTION_ASYNC);
+     PrepareStatement(CHAR_DEL_CHAR_PET_BY_SLOT, "DELETE FROM character_pet WHERE owner = ? AND (slot = ? OR slot > ?)", CONNECTION_ASYNC);
++    PrepareStatement(CHAR_DEL_CHAR_PET_BY_SLOT_EQ, "DELETE FROM character_pet WHERE owner = ? AND slot = ?", CONNECTION_ASYNC);
+     PrepareStatement(CHAR_REP_CHAR_PET, "REPLACE INTO character_pet (id, entry, owner, modelid, CreatedBySpell, PetType, level, exp, Reactstate, name, renamed, slot, curhealth, curmana, curhappiness, savetime, abdata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
+
+     // PvPstats
+diff --git a/src/server/database/Database/Implementation/CharacterDatabase.h b/src/server/database/Database/Implementation/CharacterDatabase.h
+index 3ead3cf40..a064678cf 100644
+--- a/src/server/database/Database/Implementation/CharacterDatabase.h
++++ b/src/server/database/Database/Implementation/CharacterDatabase.h
+@@ -483,8 +483,10 @@ enum CharacterDatabaseStatements : uint32
+     CHAR_SEL_PET_DECLINED_NAME,
+     CHAR_UPD_CHAR_PET_NAME,
+     CHAR_UPD_CHAR_PET_SLOT_BY_ID,
++    CHAR_UPD_CHAR_PET_NO_SLOT,
+     CHAR_DEL_CHAR_PET_BY_ID,
+     CHAR_DEL_CHAR_PET_BY_SLOT,
++    CHAR_DEL_CHAR_PET_BY_SLOT_EQ,
+     CHAR_REP_CHAR_PET,
+
+     CHAR_SEL_ITEMCONTAINER_ITEMS,
+diff --git a/src/server/game/Entities/Pet/Pet.cpp b/src/server/game/Entities/Pet/Pet.cpp
+index 55ebf72af..e8650bf58 100644
+--- a/src/server/game/Entities/Pet/Pet.cpp
++++ b/src/server/game/Entities/Pet/Pet.cpp
+@@ -20,6 +20,7 @@
+ #include "ArenaSpectator.h"
+ #include "CharmInfo.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "DatabaseEnv.h"
+ #include "GameTime.h"
+ #include "Group.h"
+@@ -507,7 +508,7 @@ void Pet::SavePetToDB(PetSaveMode mode)
+
+     // dont allow to save pet when it is loaded, possibly bugs action bar!, save only fully controlled creature
+     Player* owner = GetOwner()->ToPlayer();
+-    if (!owner || m_loading || !GetEntry() || !isControlled())
++    if (!owner || m_loading || !GetEntry() || !isControlled() || m_removed || !m_charmInfo)
+         return;
+
+     // not save pet as current if another pet temporary unsummoned
+@@ -551,10 +552,20 @@ void Pet::SavePetToDB(PetSaveMode mode)
+         // prevent existence another hunter pet in PET_SAVE_AS_CURRENT and PET_SAVE_NOT_IN_SLOT
+         if (getPetType() == HUNTER_PET && (mode == PET_SAVE_AS_CURRENT || mode > PET_SAVE_LAST_STABLE_SLOT))
+         {
+-            stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT);
+-            stmt->SetData(0, ownerLowGUID);
+-            stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));
+-            stmt->SetData(2, uint8(PET_SAVE_LAST_STABLE_SLOT));
++            bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", false);
++            if (allowMultipleUnslotted)
++            {
++                stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT_EQ);
++                stmt->SetData(0, ownerLowGUID);
++                stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));
++            }
++            else
++            {
++                stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT);
++                stmt->SetData(0, ownerLowGUID);
++                stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));
++                stmt->SetData(2, uint8(PET_SAVE_LAST_STABLE_SLOT));
++            }
+             trans->Append(stmt);
+         }
+
+@@ -596,6 +607,45 @@ void Pet::SavePetToDB(PetSaveMode mode)
+     }
+ }
+
++void Pet::SavePetStateWithoutSlot()
++{
++    if (!GetOwnerGUID().IsPlayer())
++        return;
++
++    Player* owner = GetOwner()->ToPlayer();
++    if (!owner || m_loading || !GetEntry() || !isControlled() || m_removed || !m_charmInfo)
++        return;
++
++    uint32 curhealth = GetHealth();
++    uint32 curmana = GetPower(POWER_MANA);
++
++    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
++    _SaveAuras(trans);
++    _SaveSpells(trans);
++    _SaveSpellCooldowns(trans);
++
++    CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_NO_SLOT);
++    stmt->SetData(0, GetEntry());
++    stmt->SetData(1, GetNativeDisplayId());
++    stmt->SetData(2, GetUInt32Value(UNIT_CREATED_BY_SPELL));
++    stmt->SetData(3, uint8(getPetType()));
++    stmt->SetData(4, GetLevel());
++    stmt->SetData(5, GetUInt32Value(UNIT_FIELD_PETEXPERIENCE));
++    stmt->SetData(6, uint8(GetReactState()));
++    stmt->SetData(7, GetName());
++    stmt->SetData(8, uint8(HasByteFlag(UNIT_FIELD_BYTES_2, 2, UNIT_CAN_BE_RENAMED) ? 0 : 1));
++    stmt->SetData(9, curhealth);
++    stmt->SetData(10, curmana);
++    stmt->SetData(11, GetPower(POWER_HAPPINESS));
++    stmt->SetData(12, GameTime::GetGameTime().count());
++    stmt->SetData(13, GenerateActionBarData());
++    stmt->SetData(14, m_charmInfo->GetPetNumber());
++    stmt->SetData(15, owner->GetGUID().GetCounter());
++    trans->Append(stmt);
++
++    CharacterDatabase.CommitTransaction(trans);
++}
++
+ void Pet::DeleteFromDB(ObjectGuid::LowType guidlow)
+ {
+     CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();

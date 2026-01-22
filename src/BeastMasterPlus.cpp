@@ -194,8 +194,7 @@ namespace
             return;
 
         CharmInfo* charm = pet->GetCharmInfo();
-        pet->SavePetStateWithoutSlot();
-
+        pet->SavePetToDB(PET_SAVE_AS_CURRENT);
         if (charm)
         {
             CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID);

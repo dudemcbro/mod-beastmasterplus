@@ -1,7 +1,6 @@
---- /tmp/ChatHandler.cpp.before	2026-01-22 12:45:06.934833825 -0500
-+++ /tmp/ChatHandler.cpp.after	2026-01-22 12:45:06.966834402 -0500
-@@ -41,6 +41,12 @@
- #include "WorldPacket.h"
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
  #include "WorldSession.h"
  
 +namespace AddonMessageRouter

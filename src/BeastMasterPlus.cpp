@@ -195,14 +195,6 @@ namespace
 
         CharmInfo* charm = pet->GetCharmInfo();
         pet->SavePetToDB(PET_SAVE_AS_CURRENT);
-        if (charm)
-        {
-            CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID);
-            stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));
-            stmt->SetData(1, player->GetGUID().GetCounter());
-            stmt->SetData(2, charm->GetPetNumber());
-            CharacterDatabase.Execute(stmt);
-        }
 
         PetStable* stable = player->GetPetStable();
         if (stable && charm && stable->CurrentPet && stable->CurrentPet->PetNumber == charm->GetPetNumber())

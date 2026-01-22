@@ -1,0 +1,15 @@
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -39,6 +39,12 @@
+ #include "World.h"
+ #include "WorldPacket.h"
+ #include "WorldSession.h"
+ 
++namespace AddonMessageRouter
++{
++    bool Handle(WorldSession* session, std::string const& msg);
++}
++
+ inline bool isNasty(uint8 c)
+ {

@@ -1,8 +1,6 @@
-diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
---- a/src/server/game/Handlers/ChatHandler.cpp
-+++ b/src/server/game/Handlers/ChatHandler.cpp
-@@
- #include "World.h"
+--- /tmp/ChatHandler.cpp.before	2026-01-22 12:45:06.934833825 -0500
++++ /tmp/ChatHandler.cpp.after	2026-01-22 12:45:06.966834402 -0500
+@@ -41,6 +41,12 @@
  #include "WorldPacket.h"
  #include "WorldSession.h"
  
@@ -11,10 +9,11 @@ diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers
 +    bool Handle(WorldSession* session, std::string const& msg);
 +}
 +
++
  inline bool isNasty(uint8 c)
  {
-@@
-         if (lang == LANG_ADDON)
+     if (c == '\t')
+@@ -287,6 +293,8 @@
          {
              if (AddonChannelCommandHandler(this).ParseCommands(msg.c_str()))
                  return;
@@ -23,5 +22,3 @@ diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers
          }
          else
          {
-             if (ChatHandler(this).ParseCommands(msg.c_str()))
-                 return;

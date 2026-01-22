@@ -1,17 +1,10 @@
 diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
 --- a/src/server/game/Handlers/ChatHandler.cpp
 +++ b/src/server/game/Handlers/ChatHandler.cpp
-@@ -35,11 +35,17 @@
- #include "ScriptMgr.h"
- #include "SpellAuraEffects.h"
- #include "SpellAuras.h"
- #include "Util.h"
- #include "Warden.h"
- #include "World.h"
+@@ -41,6 +41,11 @@
  #include "WorldPacket.h"
  #include "WorldSession.h"
- 
-+class WorldSession;
+
 +namespace AddonMessageRouter
 +{
 +    bool Handle(WorldSession* session, std::string const& msg);
@@ -19,7 +12,7 @@ diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers
 +
  inline bool isNasty(uint8 c)
  {
-@@ -284,9 +291,11 @@
+@@ -285,6 +290,8 @@
          if (lang == LANG_ADDON)
          {
              if (AddonChannelCommandHandler(this).ParseCommands(msg.c_str()))

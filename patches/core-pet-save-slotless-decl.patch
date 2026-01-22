@@ -1,5 +1,4 @@
 diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/Pet.h
-index 0000000..0000000 100644
 --- a/src/server/game/Entities/Pet/Pet.h
 +++ b/src/server/game/Entities/Pet/Pet.h
 @@ -63,6 +63,7 @@ class Pet : public Guardian

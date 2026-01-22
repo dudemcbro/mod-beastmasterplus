@@ -1,0 +1,13 @@
+diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/Pet.h
+index 0000000..0000000 100644
+--- a/src/server/game/Entities/Pet/Pet.h
++++ b/src/server/game/Entities/Pet/Pet.h
+@@ -63,6 +63,7 @@ class Pet : public Guardian
+       static std::pair<PetStable::PetInfo const*, PetSaveMode> GetLoadPetInfo(PetStable const& stable, uint32 petEntry, uint32 petnumber, bool current);
+       bool LoadPetFromDB(Player* owner, uint32 petEntry, uint32 petnumber, bool current, uint32 healthPct = 0, bool fullMana = false);
+       bool isBeingLoaded() const override { return m_loading; }
+       void SavePetToDB(PetSaveMode mode);
++      void SavePetStateWithoutSlot();
+       void FillPetInfo(PetStable::PetInfo* petInfo) const;
+       void Remove(PetSaveMode mode, bool returnreagent = false);
+       static void DeleteFromDB(ObjectGuid::LowType guidlow);

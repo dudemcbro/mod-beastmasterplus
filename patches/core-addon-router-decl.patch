@@ -1,8 +1,6 @@
-diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
---- a/src/server/game/Handlers/ChatHandler.cpp
-+++ b/src/server/game/Handlers/ChatHandler.cpp
-@@ -39,6 +39,12 @@
- #include "World.h"
+--- a/src/server/game/Handlers/ChatHandler.cpp	2026-01-22 13:11:59.986746902 -0500
++++ b/src/server/game/Handlers/ChatHandler.cpp	2026-01-22 13:11:59.986746902 -0500
+@@ -41,6 +41,12 @@
  #include "WorldPacket.h"
  #include "WorldSession.h"
  
@@ -11,5 +9,7 @@ diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers
 +    bool Handle(WorldSession* session, std::string const& msg);
 +}
 +
++
  inline bool isNasty(uint8 c)
  {
+     if (c == '\t')

@@ -22,6 +22,7 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
    # The patch only adds a forward declaration + call to AddonMessageRouter::Handle;
    # the actual AddonMessageRouter implementation is provided by this module in:
    #   src/BmpAddonMessageRouter.h / src/BmpAddonMessageRouter.cpp
+   # If a partial hook already exists, the script will add the missing forward declaration.
 
    # Optional (feature) patches for extended unslotted pets:
    # patch -p1 < modules/mod-beastmasterplus/patches/core-pet-save.patch

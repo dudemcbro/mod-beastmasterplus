@@ -1,0 +1,16 @@
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -41,6 +41,12 @@
+ #include "WorldPacket.h"
+ #include "WorldSession.h"
+ 
++// mod-beastmasterplus provides AddonMessageRouter in src/BmpAddonMessageRouter.*
++namespace AddonMessageRouter
++{
++    bool Handle(WorldSession* session, std::string const& msg);
++}
++
+ inline bool isNasty(uint8 c)
+ {
+     if (c == '\t')

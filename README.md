@@ -16,17 +16,13 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 1) Copy module into AzerothCore:
    modules/mod-beastmasterplus
 
-2) Apply required core hook (one time):
+2) Apply required core patch (one time):
    cd /path/to/azerothcore
    modules/mod-beastmasterplus/patches/apply-core-addon-hook.sh
-   # The patch only adds a forward declaration + call to AddonMessageRouter::Handle;
-   # the actual AddonMessageRouter implementation is provided by this module in:
+   # Applies the full BeastMasterPlus core patch (addon routing + pet-save changes).
+   # The AddonMessageRouter implementation is provided by this module:
    #   src/BmpAddonMessageRouter.h / src/BmpAddonMessageRouter.cpp
-   # If a partial hook already exists, the script will add the missing forward declaration.
-
-   # Optional (feature) patches for extended unslotted pets:
-   # patch -p1 < modules/mod-beastmasterplus/patches/core-pet-save.patch
-   # patch -p1 < modules/mod-beastmasterplus/patches/core-pet-save-slotless-decl.patch
+   # If a partial hook already exists, the script will add any missing pieces.
 
 3) Configure (optional):
    cp modules/mod-beastmasterplus/conf/mod_beastmasterplus.conf.dist \
@@ -82,4 +78,4 @@ This module requires the BeastMasterPlus addon on the client.
   Optional test data only (not required for normal operation)
 
 - patches/  
-  Minimal core hook (LANG_ADDON routing) and optional pet-save patches
+  Combined core patch (addon routing + pet-save changes) and apply script

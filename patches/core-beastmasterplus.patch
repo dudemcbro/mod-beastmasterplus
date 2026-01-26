@@ -1,3 +1,28 @@
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -41,6 +41,12 @@
+ #include "WorldPacket.h"
+ #include "WorldSession.h"
+ 
++// mod-beastmasterplus provides AddonMessageRouter in src/BmpAddonMessageRouter.*
++namespace AddonMessageRouter
++{
++    bool Handle(WorldSession* session, std::string const& msg);
++}
++
+ inline bool isNasty(uint8 c)
+ {
+     if (c == '\t')
+@@ -287,6 +293,8 @@
+         {
+             if (AddonChannelCommandHandler(this).ParseCommands(msg.c_str()))
+                 return;
++            if (AddonMessageRouter::Handle(this, msg))
++                return;
+         }
+         else
+         {
 diff --git a/src/server/database/Database/Implementation/CharacterDatabase.cpp b/src/server/database/Database/Implementation/CharacterDatabase.cpp
 index 1b8650b49..37af239ad 100644
 --- a/src/server/database/Database/Implementation/CharacterDatabase.cpp
@@ -14,7 +39,7 @@ index 1b8650b49..37af239ad 100644
      PrepareStatement(CHAR_DEL_CHAR_PET_BY_SLOT, "DELETE FROM character_pet WHERE owner = ? AND (slot = ? OR slot > ?)", CONNECTION_ASYNC);
 +    PrepareStatement(CHAR_DEL_CHAR_PET_BY_SLOT_EQ, "DELETE FROM character_pet WHERE owner = ? AND slot = ?", CONNECTION_ASYNC);
      PrepareStatement(CHAR_REP_CHAR_PET, "REPLACE INTO character_pet (id, entry, owner, modelid, CreatedBySpell, PetType, level, exp, Reactstate, name, renamed, slot, curhealth, curmana, curhappiness, savetime, abdata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
-
+ 
      // PvPstats
 diff --git a/src/server/database/Database/Implementation/CharacterDatabase.h b/src/server/database/Database/Implementation/CharacterDatabase.h
 index 3ead3cf40..a064678cf 100644
@@ -29,7 +54,7 @@ index 3ead3cf40..a064678cf 100644
      CHAR_DEL_CHAR_PET_BY_SLOT,
 +    CHAR_DEL_CHAR_PET_BY_SLOT_EQ,
      CHAR_REP_CHAR_PET,
-
+ 
      CHAR_SEL_ITEMCONTAINER_ITEMS,
 diff --git a/src/server/game/Entities/Pet/Pet.cpp b/src/server/game/Entities/Pet/Pet.cpp
 index 55ebf72af..e8650bf58 100644
@@ -44,13 +69,13 @@ index 55ebf72af..e8650bf58 100644
  #include "GameTime.h"
  #include "Group.h"
 @@ -507,7 +508,7 @@ void Pet::SavePetToDB(PetSaveMode mode)
-
+ 
      // dont allow to save pet when it is loaded, possibly bugs action bar!, save only fully controlled creature
      Player* owner = GetOwner()->ToPlayer();
 -    if (!owner || m_loading || !GetEntry() || !isControlled())
 +    if (!owner || m_loading || !GetEntry() || !isControlled() || m_removed || !m_charmInfo)
          return;
-
+ 
      // not save pet as current if another pet temporary unsummoned
 @@ -551,10 +552,20 @@ void Pet::SavePetToDB(PetSaveMode mode)
          // prevent existence another hunter pet in PET_SAVE_AS_CURRENT and PET_SAVE_NOT_IN_SLOT
@@ -76,11 +101,11 @@ index 55ebf72af..e8650bf58 100644
 +            }
              trans->Append(stmt);
          }
-
+ 
 @@ -596,6 +607,45 @@ void Pet::SavePetToDB(PetSaveMode mode)
      }
  }
-
+ 
 +void Pet::SavePetStateWithoutSlot()
 +{
 +    if (!GetOwnerGUID().IsPlayer())
@@ -123,3 +148,13 @@ index 55ebf72af..e8650bf58 100644
  void Pet::DeleteFromDB(ObjectGuid::LowType guidlow)
  {
      CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/Pet.h
+--- a/src/server/game/Entities/Pet/Pet.h
++++ b/src/server/game/Entities/Pet/Pet.h
+@@ -66,6 +66,7 @@ class Pet : public Guardian
+     bool isBeingLoaded() const override { return m_loading; }
+     void SavePetToDB(PetSaveMode mode);
++    void SavePetStateWithoutSlot();
+     void FillPetInfo(PetStable::PetInfo* petInfo) const;
+     void Remove(PetSaveMode mode, bool returnreagent = false);
+     static void DeleteFromDB(ObjectGuid::LowType guidlow);

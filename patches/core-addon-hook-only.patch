@@ -3,6 +3,7 @@ diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers
 +++ b/src/server/game/Handlers/ChatHandler.cpp
  #include "WorldSession.h"
  
++// mod-beastmasterplus provides AddonMessageRouter in src/BmpAddonMessageRouter.*
 +namespace AddonMessageRouter
 +{
 +    bool Handle(WorldSession* session, std::string const& msg);

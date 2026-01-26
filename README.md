@@ -9,6 +9,7 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 - Pets persist 1:1 in DB
 - Addon driven UI over CHAT_MSG_ADDON
 - Avoids stable logic, slots, and NPC flows
+- Owns the AddonMessageRouter implementation (core only forward-declares it)
 
 ## Installation (fresh server)
 
@@ -18,6 +19,13 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 2) Apply required core hook (one time):
    cd /path/to/azerothcore
    modules/mod-beastmasterplus/patches/apply-core-addon-hook.sh
+   # The patch only adds a forward declaration + call to AddonMessageRouter::Handle;
+   # the actual AddonMessageRouter implementation is provided by this module in:
+   #   src/BmpAddonMessageRouter.h / src/BmpAddonMessageRouter.cpp
+
+   # Optional (feature) patches for extended unslotted pets:
+   # patch -p1 < modules/mod-beastmasterplus/patches/core-pet-save.patch
+   # patch -p1 < modules/mod-beastmasterplus/patches/core-pet-save-slotless-decl.patch
 
 3) Configure (optional):
    cp modules/mod-beastmasterplus/conf/mod_beastmasterplus.conf.dist \
@@ -26,13 +34,15 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 4) Build:
    ./acore.sh compiler
 
-5) Apply SQL (optional test data only):
+5) Apply SQL (optional test data only; dev-only, can delete pets for @owner):
    sql/world/base/optional_seed_bmp_test_pets.sql
 
 ## Notes
 - This module intentionally does not modify stable limits
 - All pet data remains in character_pet
 - Addon UI is required for interaction
+- AddonMessageRouter is owned by this module (core only forward-declares it)
+- SQL seed is for testing only; do not use on production data
 
 ## Client Addon Installation (required)
 
@@ -70,9 +80,5 @@ This module requires the BeastMasterPlus addon on the client.
 - sql/world/base/optional_seed_bmp_test_pets.sql  
   Optional test data only (not required for normal operation)
 
-- tools/  
-  Developer and audit utilities
-
 - patches/  
-  Minimal required core hook (LANG_ADDON routing)
-
+  Minimal core hook (LANG_ADDON routing) and optional pet-save patches

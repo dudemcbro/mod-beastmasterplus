@@ -23,12 +23,12 @@ fi
 # Normalize defaults if patch already present but default is false
 if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$PET_FILE"; then
   echo "Updating AllowMultipleUnslottedPets default in Pet.cpp -> true"
-  perl -pi -e 's/BeastMasterPlus\\.AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$PET_FILE"
+  perl -pi -e 's/BeastMasterPlus[.]AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$PET_FILE"
 fi
 
 if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$HUNTER_FILE"; then
   echo "Updating AllowMultipleUnslottedPets default in spell_hunter.cpp -> true"
-  perl -pi -e 's/BeastMasterPlus\\.AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$HUNTER_FILE"
+  perl -pi -e 's/BeastMasterPlus[.]AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$HUNTER_FILE"
 fi
 
 HOOK_PRESENT=0

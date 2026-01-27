@@ -249,6 +249,13 @@ function HSP.DismissPet(petNumber, petName)
     print("|cFFFFD100BMP:|r Dismissing " .. (petName or "pet") .. "...")
 end
 
+function HSP.NormalizePets()
+    local msg = "NORMALIZE"
+    Info("Sending normalize request: prefix=BMP, message=%s", msg)
+    SendAddonMessage(ADDON_PREFIX, msg, "WHISPER", UnitName("player"))
+    print("|cFFFFD100BMP:|r Normalizing slot=0 pets (GM only)...")
+end
+
 local function EnsurePetTalentUI()
     if TogglePetTalentFrame or PetTalentFrame_Toggle or PetTalentFrame then
         return true
@@ -605,7 +612,7 @@ function HSP.OnAddonMessage(prefix, message, channel, sender)
     local isLocalEcho = (sender == playerName)
     
     if isLocalEcho then
-        if message == "LIST" or message:find("^SUMMON|") or message:find("^DISMISS") then
+        if message == "LIST" or message == "NORMALIZE" or message:find("^SUMMON|") or message:find("^DISMISS") then
             Debug("Ignoring local echo: %s", message)
             return
         end
@@ -1161,6 +1168,8 @@ SlashCmdList["BEASTMASTERPLUS"] = function(msg)
         else
             Warn("Usage: /bmp dismiss <petNumber>")
         end
+    elseif msg == "normalize" then
+        HSP.NormalizePets()
     elseif msg == "list" then
         HSP.ListManualPets()
     elseif msg == "clear" then
@@ -1177,6 +1186,7 @@ SlashCmdList["BEASTMASTERPLUS"] = function(msg)
         print("  /bmp count - Show pet count")
         print("  /bmp compact - Toggle compact mode")
         print("  /bmp dismiss <petNumber> - Dismiss active pet (not permanent)")
+        print("  /bmp normalize - Normalize slot=0 pets (GM only)")
         print("|cFF888888Debug:|r")
         print("  /bmp debug - Toggle debug mode")
         print("  /bmp dump - Dump pet data")

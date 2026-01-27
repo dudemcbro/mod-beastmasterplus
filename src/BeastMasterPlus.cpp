@@ -2,6 +2,7 @@
 #include "DatabaseEnv.h"
 #include "Log.h"
 #include "BmpAddonMessageRouter.h"
+#include "Common.h"
 #include "Group.h"
 #include "Opcodes.h"
 #include "Pet.h"
@@ -390,6 +391,48 @@ namespace
             return;
         }
 
+        if (payload == "NORMALIZE")
+        {
+            if (session->GetSecurity() < SEC_GAMEMASTER)
+            {
+                SendError(session, "NO_PERM");
+                return;
+            }
+
+            uint32 toNormalize = 0;
+            QueryResult countRes = CharacterDatabase.Query(
+                "SELECT COUNT(*) FROM character_pet cp "
+                "JOIN ("
+                "  SELECT owner, MAX(id) AS keep_id "
+                "  FROM character_pet "
+                "  WHERE slot = 0 AND PetType = 1 "
+                "  GROUP BY owner "
+                "  HAVING COUNT(*) > 1"
+                ") k ON cp.owner = k.owner "
+                "WHERE cp.slot = 0 AND cp.PetType = 1 AND cp.id <> k.keep_id");
+
+            if (countRes)
+                toNormalize = countRes->Fetch()[0].Get<uint32>();
+
+            if (toNormalize > 0)
+            {
+                CharacterDatabase.Execute(
+                    "UPDATE character_pet cp "
+                    "JOIN ("
+                    "  SELECT owner, MAX(id) AS keep_id "
+                    "  FROM character_pet "
+                    "  WHERE slot = 0 AND PetType = 1 "
+                    "  GROUP BY owner "
+                    "  HAVING COUNT(*) > 1"
+                    ") k ON cp.owner = k.owner "
+                    "SET cp.slot = 100 "
+                    "WHERE cp.slot = 0 AND cp.PetType = 1 AND cp.id <> k.keep_id");
+            }
+
+            SendOk(session, "NORMALIZED|" + std::to_string(toNormalize));
+            return;
+        }
+
         if (payload.rfind("SUMMON|", 0) == 0)
         {
             std::string arg = payload.substr(7);
@@ -526,7 +569,7 @@ namespace BmpRouter
 
         if (!hadPrefix)
         {
-            if (!(payload == "LIST" || payload.rfind("SUMMON|", 0) == 0 || payload == "DISMISS" || payload.rfind("DISMISS|", 0) == 0 || payload.rfind("HELLO|", 0) == 0))
+            if (!(payload == "LIST" || payload == "NORMALIZE" || payload.rfind("SUMMON|", 0) == 0 || payload == "DISMISS" || payload.rfind("DISMISS|", 0) == 0 || payload.rfind("HELLO|", 0) == 0))
                 return false;
         }
 

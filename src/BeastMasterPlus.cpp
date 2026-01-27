@@ -184,6 +184,30 @@ namespace
         return true;
     }
 
+    static void NormalizeSlotZero(Player* player, uint32 activePetNumber)
+    {
+        if (!player)
+            return;
+
+        ObjectGuid::LowType ownerLow = player->GetGUID().GetCounter();
+        QueryResult result = CharacterDatabase.Query(
+            "SELECT id FROM character_pet WHERE owner = {} AND slot = {} AND id <> {}",
+            ownerLow, uint32(PET_SAVE_AS_CURRENT), activePetNumber);
+
+        if (!result)
+            return;
+
+        do
+        {
+            uint32 petNumber = result->Fetch()[0].Get<uint32>();
+            CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID);
+            stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));
+            stmt->SetData(1, ownerLow);
+            stmt->SetData(2, petNumber);
+            CharacterDatabase.Execute(stmt);
+        } while (result->NextRow());
+    }
+
     static void DetachActivePetNoSave(Player* player)
     {
         if (!player)
@@ -193,33 +217,15 @@ namespace
         if (!pet)
             return;
 
+        if (!pet->IsHunterPet())
+            return;
+
         CharmInfo* charm = pet->GetCharmInfo();
-        pet->SavePetToDB(PET_SAVE_AS_CURRENT);
+        if (!charm)
+            return;
 
-        PetStable* stable = player->GetPetStable();
-        if (stable && charm && stable->CurrentPet && stable->CurrentPet->PetNumber == charm->GetPetNumber())
-        {
-            uint32 petNumber = stable->CurrentPet->PetNumber;
-            bool exists = std::any_of(stable->UnslottedPets.begin(), stable->UnslottedPets.end(),
-                [petNumber](PetStable::PetInfo const& info) { return info.PetNumber == petNumber; });
-            if (!exists)
-                stable->UnslottedPets.push_back(std::move(*stable->CurrentPet));
-            stable->CurrentPet.reset();
-        }
-
-        player->SetMinion(pet, false);
-        pet->AddObjectToRemoveList();
-        pet->m_removed = true;
-
-        if (pet->isControlled())
-        {
-            WorldPacket data(SMSG_PET_SPELLS, 8);
-            data << uint64(0);
-            player->SendDirectMessage(&data);
-
-            if (player->GetGroup())
-                player->SetGroupUpdateFlag(GROUP_UPDATE_PET);
-        }
+        NormalizeSlotZero(player, charm->GetPetNumber());
+        player->RemovePet(pet, PET_SAVE_NOT_IN_SLOT, false);
     }
 
     static void HandleBmp(WorldSession* session, std::string const& payload)
@@ -314,6 +320,19 @@ namespace
             ObjectGuid::LowType activePetGuid = 0;
             if (activePet)
                 activePetGuid = activePet->GetCharmInfo() ? activePet->GetCharmInfo()->GetPetNumber() : 0;
+
+            for (PetRow& row : rows)
+            {
+                if (row.slot == PET_SAVE_AS_CURRENT && (!activePetGuid || row.petNumber != activePetGuid))
+                {
+                    CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID);
+                    stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));
+                    stmt->SetData(1, ownerLow);
+                    stmt->SetData(2, row.petNumber);
+                    CharacterDatabase.Execute(stmt);
+                    row.slot = PET_SAVE_NOT_IN_SLOT;
+                }
+            }
 
             std::unordered_map<uint32, FamilyInfo> familyByEntry;
             if (!entries.empty())

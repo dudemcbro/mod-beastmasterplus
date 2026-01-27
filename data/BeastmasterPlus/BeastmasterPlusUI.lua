@@ -1,166 +1,106 @@
--- Beastmaster Plus UI
--- Complete in-game UI with accessibility and QoL improvements
+-- Beastmaster Plus Minimal UI (debug-focused)
 
 local addonName, HSP = ...
 
--- UI Constants
-local FRAME_WIDTH = 720
-local FRAME_HEIGHT = 580
-local ROW_HEIGHT = 36
-local ROWS_VISIBLE = 10
-local HEADER_HEIGHT = 40
-local FILTER_HEIGHT = 70
-local FOOTER_HEIGHT = 40
+local DEFAULT_WIDTH = 620
+local DEFAULT_HEIGHT = 440
+local HEADER_HEIGHT = 72
+local FOOTER_HEIGHT = 28
+local ROW_HEIGHT = 24
+local SCROLLBAR_WIDTH = 16
+local MINIMAP_BUTTON_SIZE = 32
+local MINIMAP_ICON_SIZE = 14
+local MINIMAP_BG_SIZE = 22
+local MINIMAP_BORDER_SIZE = 54
+local MINIMAP_BORDER_OFFSET_X = 0
+local MINIMAP_BORDER_OFFSET_Y = 0
+local MINIMAP_HIGHLIGHT_OFFSET_X = 0
+local MINIMAP_HIGHLIGHT_OFFSET_Y = 0
+local MINIMAP_ICON_OFFSET_X = 0
+local MINIMAP_ICON_OFFSET_Y = 0
 
--- Colors (WoW-themed dark fantasy - improved contrast)
+local selectedRowIndex = 1
+local selectedPet = nil
+local selectedPetId = nil
+
 local COLORS = {
-    background = { 0.06, 0.06, 0.10, 0.98 },
-    header = { 0.10, 0.10, 0.16, 1 },
-    border = { 0.50, 0.45, 0.25, 1 },
-    gold = { 1, 0.82, 0.2, 1 },
     text = { 0.95, 0.95, 0.95, 1 },
-    textDim = { 0.70, 0.70, 0.70, 1 },
-    textMuted = { 0.50, 0.50, 0.50, 1 },
-    row = { 0.08, 0.08, 0.12, 1 },
-    rowAlt = { 0.10, 0.10, 0.14, 1 },
-    rowHover = { 0.20, 0.18, 0.14, 1 },
-    rowSelected = { 0.25, 0.22, 0.15, 1 },
-    exotic = { 0.70, 0.30, 0.90, 1 },
-    active = { 0.30, 0.90, 0.40, 1 },
-    favorite = { 1, 0.82, 0.2, 1 },
-    buttonBg = { 0.15, 0.15, 0.20, 1 },
-    filterActive = { 0.30, 0.25, 0.15, 1 },
-    -- Level colors for visual hierarchy
-    levelLow = { 0.60, 0.60, 0.60, 1 },      -- 1-19 gray
-    levelMid = { 0.30, 0.90, 0.30, 1 },      -- 20-39 green
-    levelHigh = { 0.30, 0.60, 1.00, 1 },     -- 40-59 blue
-    levelVeryHigh = { 0.70, 0.30, 0.90, 1 }, -- 60-79 purple
-    levelMax = { 1.00, 0.50, 0.00, 1 },      -- 80 orange
-}
-
--- Pet family icons (WoW 3.3.5a compatible)
-local FAMILY_ICONS = {
-    ["Bat"] = "Interface\\Icons\\Ability_Hunter_Pet_Bat",
-    ["Bear"] = "Interface\\Icons\\Ability_Hunter_Pet_Bear",
-    ["Bird of Prey"] = "Interface\\Icons\\Ability_Hunter_Pet_Owl",
-    ["Boar"] = "Interface\\Icons\\Ability_Hunter_Pet_Boar",
-    ["Carrion Bird"] = "Interface\\Icons\\Ability_Hunter_Pet_Vulture",
-    ["Cat"] = "Interface\\Icons\\Ability_Hunter_Pet_Cat",
-    ["Chimaera"] = "Interface\\Icons\\Ability_Hunter_Pet_Chimera",
-    ["Core Hound"] = "Interface\\Icons\\Ability_Hunter_Pet_CoreHound",
-    ["Crab"] = "Interface\\Icons\\Ability_Hunter_Pet_Crab",
-    ["Crocolisk"] = "Interface\\Icons\\Ability_Hunter_Pet_Crocolisk",
-    ["Devilsaur"] = "Interface\\Icons\\Ability_Hunter_Pet_Devilsaur",
-    ["Dragonhawk"] = "Interface\\Icons\\Ability_Hunter_Pet_DragonHawk",
-    ["Gorilla"] = "Interface\\Icons\\Ability_Hunter_Pet_Gorilla",
-    ["Hyena"] = "Interface\\Icons\\Ability_Hunter_Pet_Hyena",
-    ["Moth"] = "Interface\\Icons\\Ability_Hunter_Pet_Moth",
-    ["Nether Ray"] = "Interface\\Icons\\Ability_Hunter_Pet_NetherRay",
-    ["Raptor"] = "Interface\\Icons\\Ability_Hunter_Pet_Raptor",
-    ["Ravager"] = "Interface\\Icons\\Ability_Hunter_Pet_Ravager",
-    ["Rhino"] = "Interface\\Icons\\Ability_Hunter_Pet_Rhino",
-    ["Scorpid"] = "Interface\\Icons\\Ability_Hunter_Pet_Scorpid",
-    ["Serpent"] = "Interface\\Icons\\Ability_Hunter_Pet_Serpent",
-    ["Silithid"] = "Interface\\Icons\\Ability_Hunter_Pet_Silithid",
-    ["Spider"] = "Interface\\Icons\\Ability_Hunter_Pet_Spider",
-    ["Spirit Beast"] = "Interface\\Icons\\Ability_Hunter_Pet_SpiritBeast",
-    ["Sporebat"] = "Interface\\Icons\\Ability_Hunter_Pet_Sporebat",
-    ["Tallstrider"] = "Interface\\Icons\\Ability_Hunter_Pet_TallStrider",
-    ["Turtle"] = "Interface\\Icons\\Ability_Hunter_Pet_Turtle",
-    ["Warp Stalker"] = "Interface\\Icons\\Ability_Hunter_Pet_WarpStalker",
-    ["Wasp"] = "Interface\\Icons\\Ability_Hunter_Pet_Wasp",
-    ["Wind Serpent"] = "Interface\\Icons\\Ability_Hunter_Pet_WindSerpent",
-    ["Wolf"] = "Interface\\Icons\\Ability_Hunter_Pet_Wolf",
-    ["Worm"] = "Interface\\Icons\\Ability_Hunter_Pet_Worm",
-    ["Unknown"] = "Interface\\Icons\\INV_Misc_QuestionMark",
+    textDim = { 0.75, 0.75, 0.75, 1 },
+    highlight = { 1, 0.82, 0.2, 1 },
 }
 
 local function GetFamilyIcon(family)
-    return FAMILY_ICONS[family] or FAMILY_ICONS["Unknown"]
-end
-
-local function GetLevelColor(level)
-    level = tonumber(level) or 1
-    if level >= 80 then return COLORS.levelMax
-    elseif level >= 60 then return COLORS.levelVeryHigh
-    elseif level >= 40 then return COLORS.levelHigh
-    elseif level >= 20 then return COLORS.levelMid
-    else return COLORS.levelLow end
-end
-
--- Selected row tracking
-local selectedRowIndex = nil
-
--- ============================================================================
--- UTILITY FUNCTIONS
--- ============================================================================
-
-local function CreateBackdrop(frame, bgColor, borderColor)
-    if frame.SetBackdrop then
-        frame:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-            insets = { left = 0, right = 0, top = 0, bottom = 0 },
-        })
-        frame:SetBackdropColor(unpack(bgColor or COLORS.background))
-        frame:SetBackdropBorderColor(unpack(borderColor or COLORS.border))
+    local icons = HSP.FAMILY_ICONS or {}
+    if type(family) == "number" then
+        family = (HSP.PET_FAMILIES and HSP.PET_FAMILIES[family]) or family
     end
+    return icons[family] or icons["Unknown"] or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
-local function CreateButton(parent, text, width, height, tooltip)
-    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btn:SetSize(width or 80, height or 24)
-    btn:SetText(text)
-    btn:GetFontString():SetFont("Fonts\\FRIZQT__.TTF", 11)
-    if tooltip then
-        btn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(tooltip, 1, 1, 1, true)
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    end
-    return btn
-end
-
-local function CreateIconButton(parent, size, icon, tooltip)
-    local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(size, size)
-    CreateBackdrop(btn, COLORS.buttonBg, COLORS.border)
-    
-    btn.icon = btn:CreateTexture(nil, "ARTWORK")
-    btn.icon:SetSize(size - 6, size - 6)
-    btn.icon:SetPoint("CENTER")
-    btn.icon:SetTexture(icon)
-    
-    btn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.25, 0.22, 0.18, 1)
-        if tooltip then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(tooltip, 1, 1, 1, true)
-            GameTooltip:Show()
+local function FormatPetNameForDisplay(petData)
+    if petData then
+        local name = petData.name
+        if name and name ~= "" then
+            return tostring(name)
         end
-    end)
-    btn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(unpack(COLORS.buttonBg))
-        GameTooltip:Hide()
-    end)
-    
+        local slot = tonumber(petData.stableIndex or petData.petNumber)
+        if slot then
+            return string.format("Slot %02d", slot)
+        end
+    end
+    return "Pet"
+end
+
+local function FormatPetFamilyForDisplay(petData)
+    if petData and petData.family then
+        if type(petData.family) == "number" and HSP.PET_FAMILIES then
+            return HSP.PET_FAMILIES[petData.family] or "Unknown"
+        end
+        if petData.family ~= "" then
+            return tostring(petData.family)
+        end
+    end
+    return "Unknown"
+end
+
+local function CreateBackdrop(frame)
+    if not frame.SetBackdrop then
+        return
+    end
+    frame:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        edgeSize = 16,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+end
+
+local function CreateButton(parent, text, width, height)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(width or 70, height or 22)
+    btn:SetText(text)
     return btn
 end
 
 local function CreateEditBox(parent, width, height, placeholder)
     local edit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    edit:SetSize(width or 150, height or 24)
+    edit:SetSize(width or 160, height or 22)
     edit:SetAutoFocus(false)
-    edit:SetFont("Fonts\\FRIZQT__.TTF", 11)
+    edit:SetFont("Fonts\\FRIZQT__.TTF", 10)
     if placeholder then
-        edit.placeholder = edit:CreateFontString(nil, "ARTWORK", "GameFontDisable")
+        edit.placeholder = edit:CreateFontString(nil, "OVERLAY", "GameFontDisable")
         edit.placeholder:SetPoint("LEFT", 5, 0)
         edit.placeholder:SetText(placeholder)
-        edit:SetScript("OnTextChanged", function(self)
+        edit:SetScript("OnEditFocusGained", function(self)
+            self.placeholder:Hide()
+        end)
+        edit:SetScript("OnEditFocusLost", function(self)
             if self:GetText() == "" then
+                self.placeholder:Show()
+            end
+        end)
+        edit:SetScript("OnTextChanged", function(self)
+            if self:GetText() == "" and not self:HasFocus() then
                 self.placeholder:Show()
             else
                 self.placeholder:Hide()
@@ -170,182 +110,232 @@ local function CreateEditBox(parent, width, height, placeholder)
     return edit
 end
 
-local dropdownCounter = 0
-local function CreateDropdown(parent, width, items, onSelect)
-    dropdownCounter = dropdownCounter + 1
-    local dropdownName = "BMPDropdown" .. dropdownCounter
-    local dropdown = CreateFrame("Frame", dropdownName, parent, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(dropdown, width or 120)
-    
-    dropdown.items = items or {}
-    dropdown.onSelect = onSelect
-    dropdown.selectedValue = nil
-    
-    UIDropDownMenu_Initialize(dropdown, function(self, level)
-        level = level or 1
-        for _, item in ipairs(dropdown.items) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = item.text or ""
-            info.value = item.value or ""
-            info.checked = (dropdown.selectedValue == item.value)
-            info.func = function()
-                UIDropDownMenu_SetSelectedValue(dropdown, item.value)
-                UIDropDownMenu_SetText(dropdown, item.text)
-                dropdown.selectedValue = item.value
-                if dropdown.onSelect then dropdown.onSelect(item.value) end
-            end
-            UIDropDownMenu_AddButton(info, level)
+local function CreatePetRow(parent, index)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetHeight(ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", 4, -((index - 1) * ROW_HEIGHT))
+    row:SetPoint("TOPRIGHT", -4, -((index - 1) * ROW_HEIGHT))
+    row:RegisterForClicks("AnyUp")
+
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(20, 20)
+    row.icon:SetPoint("LEFT", 2, 0)
+    row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+    row.name:SetWidth(210)
+    row.name:SetJustifyH("LEFT")
+
+    row.level = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.level:SetPoint("LEFT", row.name, "RIGHT", 8, 0)
+    row.level:SetWidth(40)
+    row.level:SetJustifyH("CENTER")
+
+    row.family = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.family:SetPoint("LEFT", row.level, "RIGHT", 8, 0)
+    row.family:SetJustifyH("LEFT")
+
+    row.lastClick = 0
+    row:SetScript("OnClick", function(self)
+        if not self.petData then
+            return
+        end
+        local now = GetTime()
+        local isDoubleClick = (now - self.lastClick) < 0.4
+        self.lastClick = now
+
+        selectedRowIndex = self.rowIndex or 1
+        selectedPet = self.petData
+        selectedPetId = self.petData.petNumber or self.petData.stableIndex
+        HSP.UpdateUI()
+
+        if isDoubleClick then
+            HSP.AddRecentPet(self.petData)
+            HSP.SummonPet(self.petData.petNumber or self.petData.stableIndex, self.petData.name or "pet")
         end
     end)
-    
-    return dropdown
+
+    return row
 end
 
--- ============================================================================
--- MAIN FRAME
--- ============================================================================
+local function CreatePetList(parent)
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetPoint("TOPLEFT", 8, -HEADER_HEIGHT)
+    container:SetPoint("BOTTOMRIGHT", -(8 + SCROLLBAR_WIDTH), FOOTER_HEIGHT + 8)
+    container.rows = {}
+
+    local scrollFrame = CreateFrame("ScrollFrame", "BeastmasterPlusScrollFrame", parent, "FauxScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", container, "TOPRIGHT", 2, 0)
+    scrollFrame:SetPoint("BOTTOMLEFT", container, "BOTTOMRIGHT", 2, 0)
+    scrollFrame:SetWidth(SCROLLBAR_WIDTH)
+    scrollFrame:SetScript("OnVerticalScroll", function(self, offset)
+        if not FauxScrollFrame_OnVerticalScroll then
+            return
+        end
+        FauxScrollFrame_OnVerticalScroll(self, offset, ROW_HEIGHT, function()
+            local maxRows = math.max(1, math.floor(container:GetHeight() / ROW_HEIGHT))
+            if FauxScrollFrame_GetOffset then
+                local newOffset = FauxScrollFrame_GetOffset(self) or 0
+                HSP.SetScrollOffset(newOffset, maxRows)
+                HSP.UpdateUI()
+            end
+        end)
+    end)
+
+    parent.scrollFrame = scrollFrame
+    return container
+end
+
+function HSP.RebuildRows()
+    local frame = HSP.MainFrame
+    if not frame or not frame.petList then return end
+
+    local container = frame.petList
+    local listHeight = container:GetHeight()
+    local maxRows = math.max(1, math.floor(listHeight / ROW_HEIGHT))
+
+    for _, row in ipairs(container.rows) do
+        row:Hide()
+        row:SetParent(nil)
+    end
+    container.rows = {}
+
+    for i = 1, maxRows do
+        container.rows[i] = CreatePetRow(container, i)
+    end
+end
+
+function HSP.UpdateUI()
+    local frame = HSP.MainFrame
+    if not frame or not frame:IsShown() then return end
+
+    local container = frame.petList
+    local listHeight = container:GetHeight()
+    local maxRows = math.max(1, math.floor(listHeight / ROW_HEIGHT))
+
+    if #container.rows ~= maxRows then
+        HSP.RebuildRows()
+    end
+
+    local pets, totalPets, scrollOff = HSP.GetVisiblePets(maxRows)
+    pets = pets or {}
+
+    if frame.scrollFrame and FauxScrollFrame_Update then
+        FauxScrollFrame_Update(frame.scrollFrame, totalPets, maxRows, ROW_HEIGHT)
+        if frame.scrollFrame.GetVerticalScroll and frame.scrollFrame.SetVerticalScroll then
+            local desired = (scrollOff or 0) * ROW_HEIGHT
+            if math.abs((frame.scrollFrame:GetVerticalScroll() or 0) - desired) > 0.1 then
+                frame.scrollFrame:SetVerticalScroll(desired)
+            end
+        end
+    end
+
+    if selectedPetId then
+        for idx, pet in ipairs(pets) do
+            local petId = pet and (pet.petNumber or pet.stableIndex)
+            if petId and petId == selectedPetId then
+                selectedRowIndex = idx
+                break
+            end
+        end
+    end
+
+    if selectedRowIndex > #pets then
+        selectedRowIndex = math.max(1, #pets)
+    end
+    if selectedRowIndex < 1 then
+        selectedRowIndex = 1
+    end
+
+    selectedPet = pets[selectedRowIndex]
+    if selectedPet then
+        selectedPetId = selectedPet.petNumber or selectedPet.stableIndex
+    end
+
+    if frame.petCount then
+        frame.petCount:SetText(totalPets .. " pets")
+    end
+
+    for i, row in ipairs(container.rows) do
+        local pet = pets[i]
+        if pet then
+            row:Show()
+            row.rowIndex = i
+            row.petData = pet
+
+            local name = FormatPetNameForDisplay(pet)
+            local family = FormatPetFamilyForDisplay(pet)
+            row.name:SetText(name)
+            row.level:SetText(tostring(pet.level or "?"))
+            row.family:SetText(family)
+            row.icon:SetTexture(pet.icon or GetFamilyIcon(family))
+
+            if i == selectedRowIndex then
+                row.name:SetTextColor(unpack(COLORS.highlight))
+            else
+                row.name:SetTextColor(unpack(COLORS.text))
+            end
+        else
+            row:Hide()
+        end
+    end
+end
 
 local function CreateMainFrame()
+    local db = BeastmasterPlusCharDB or {}
+    local frameWidth = db.frameWidth or DEFAULT_WIDTH
+    local frameHeight = db.frameHeight or DEFAULT_HEIGHT
+
     local frame = CreateFrame("Frame", "BeastmasterPlusFrame", UIParent)
-    frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
+    frame:SetSize(frameWidth, frameHeight)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        BeastmasterPlusCharDB.frameWidth = frame:GetWidth()
+        BeastmasterPlusCharDB.frameHeight = frame:GetHeight()
+    end)
     frame:SetClampedToScreen(true)
     frame:SetFrameStrata("HIGH")
-    
-    CreateBackdrop(frame, COLORS.background, COLORS.border)
-    
-    -- Keyboard support (Escape to close) - 3.3.5a compatible
-    -- Use tinsert to add to UISpecialFrames so ESC closes the frame
-    tinsert(UISpecialFrames, "BeastmasterPlusFrame")
-    
-    -- Title bar with pet count
-    local header = CreateFrame("Frame", nil, frame)
-    header:SetSize(FRAME_WIDTH, HEADER_HEIGHT)
-    header:SetPoint("TOP")
-    CreateBackdrop(header, COLORS.header, { 0, 0, 0, 0 })
-    
-    local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("LEFT", 15, 0)
+
+    CreateBackdrop(frame)
+
+    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 12, -12)
     title:SetText("|cFFFFD100Beastmaster Plus|r")
-    
-    -- Pet count with filter status
-    frame.petCount = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.petCount:SetPoint("LEFT", title, "RIGHT", 15, 0)
+
+    frame.petCount = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.petCount:SetPoint("LEFT", title, "RIGHT", 12, 0)
     frame.petCount:SetTextColor(unpack(COLORS.textDim))
-    
-    -- Filter status indicator
-    frame.filterStatus = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    frame.filterStatus:SetPoint("LEFT", frame.petCount, "RIGHT", 10, 0)
-    frame.filterStatus:SetTextColor(unpack(COLORS.gold))
-    
-    -- Close button with tooltip
-    local closeBtn = CreateButton(header, "X", 24, 24, "Close window (Escape)")
-    closeBtn:SetPoint("RIGHT", -8, 0)
-    closeBtn:SetScript("OnClick", function() frame:Hide() end)
-    
-    return frame
-end
 
--- ============================================================================
--- FILTER BAR WITH QUICK FILTERS
--- ============================================================================
-
-local function CreateFilterBar(parent)
-    local bar = CreateFrame("Frame", nil, parent)
-    bar:SetSize(FRAME_WIDTH - 20, FILTER_HEIGHT)
-    bar:SetPoint("TOP", 0, -HEADER_HEIGHT - 5)
-    CreateBackdrop(bar, COLORS.header, { 0, 0, 0, 0 })
-    
-    -- Search box
-    local searchBox = CreateEditBox(bar, 180, 24, "Search pets...")
-    searchBox:SetPoint("TOPLEFT", 10, -8)
+    local searchBox = CreateEditBox(frame, 160, 22, "Search...")
+    searchBox:SetPoint("TOPLEFT", 12, -32)
     searchBox:SetScript("OnTextChanged", function(self)
-        local text = self:GetText() or ""
-        if self.placeholder then
-            self.placeholder:SetShown(text == "")
-        end
-        HSP.SetSearch(text)
+        HSP.SetSearch(self:GetText() or "")
         HSP.UpdateUI()
     end)
-    bar.searchBox = searchBox
-    
-    -- Family dropdown
-    local familyItems = {{ text = "All Families", value = nil }}
-    for _, family in ipairs(HSP.PET_FAMILIES or {}) do
-        table.insert(familyItems, { text = family, value = family })
-    end
-    
-    bar.familyDropdown = CreateDropdown(bar, 120, familyItems, function(value)
-        HSP.SetFilter("family", value)
-        HSP.UpdateUI()
-    end)
-    bar.familyDropdown:SetPoint("TOPLEFT", 200, -2)
-    UIDropDownMenu_SetText(bar.familyDropdown, "All Families")
-    
-    -- Quick filter buttons (second row)
-    local quickLabel = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    quickLabel:SetPoint("TOPLEFT", 10, -38)
-    quickLabel:SetText("Quick Filters:")
-    quickLabel:SetTextColor(unpack(COLORS.textDim))
-    
-    -- Exotic only toggle
-    bar.exoticBtn = CreateButton(bar, "Exotic", 60, 22, "Toggle exotic pets only")
-    bar.exoticBtn:SetPoint("LEFT", quickLabel, "RIGHT", 10, 0)
-    bar.exoticBtn:SetScript("OnClick", function()
-        HSP.SetQuickFilter("exotic")
-        HSP.UpdateUI()
-    end)
-    
-    -- Max level toggle
-    bar.maxLevelBtn = CreateButton(bar, "Lv 80", 55, 22, "Toggle max level pets only")
-    bar.maxLevelBtn:SetPoint("LEFT", bar.exoticBtn, "RIGHT", 5, 0)
-    bar.maxLevelBtn:SetScript("OnClick", function()
-        HSP.SetQuickFilter("maxLevel")
-        HSP.UpdateUI()
-    end)
-    
-    -- Clear filters
-    bar.clearBtn = CreateButton(bar, "Clear", 50, 22, "Clear all filters")
-    bar.clearBtn:SetPoint("LEFT", bar.maxLevelBtn, "RIGHT", 5, 0)
-    bar.clearBtn:SetScript("OnClick", function()
-        HSP.SetQuickFilter("clear")
-        bar.searchBox:SetText("")
-        UIDropDownMenu_SetText(bar.familyDropdown, "All Families")
-        HSP.UpdateUI()
-    end)
-    
-    return bar
-end
+    frame.searchBox = searchBox
 
--- ============================================================================
--- SORT HEADERS
--- ============================================================================
+    local function CreateSortHeader(text, field, x, width)
+        local btn = CreateFrame("Button", nil, frame)
+        btn:SetSize(width or 60, 16)
+        btn:SetPoint("TOPLEFT", x, -56)
 
-local function CreateSortHeaders(parent)
-    local bar = CreateFrame("Frame", nil, parent)
-    bar:SetSize(FRAME_WIDTH - 20, 24)
-    bar:SetPoint("TOP", 0, -HEADER_HEIGHT - FILTER_HEIGHT - 10)
-    CreateBackdrop(bar, COLORS.header, { 0, 0, 0, 0 })
-    
-    local function CreateSortButton(text, field, xPos, width, tooltip)
-        local btn = CreateFrame("Button", nil, bar)
-        btn:SetSize(width, 24)
-        btn:SetPoint("LEFT", xPos, 0)
-        
-        btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        btn.text:SetPoint("LEFT", 5, 0)
-        btn.text:SetText(text)
-        btn.text:SetTextColor(unpack(COLORS.gold))
-        
-        btn.arrow = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        btn.arrow:SetPoint("LEFT", btn.text, "RIGHT", 3, 0)
-        btn.arrow:SetText("")
-        
+        local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        label:SetPoint("LEFT", 0, 0)
+        label:SetText(text)
+        btn.label = label
+
+        btn:SetScript("OnEnter", function(self)
+            self.label:SetTextColor(unpack(COLORS.highlight))
+        end)
+        btn:SetScript("OnLeave", function(self)
+            self.label:SetTextColor(unpack(COLORS.text))
+        end)
         btn:SetScript("OnClick", function()
             local db = BeastmasterPlusCharDB
             if db.sortBy == field then
@@ -356,635 +346,236 @@ local function CreateSortHeaders(parent)
             end
             HSP.UpdateUI()
         end)
-        
-        btn:SetScript("OnEnter", function(self)
-            self.text:SetTextColor(1, 1, 1, 1)
-            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            GameTooltip:AddLine(tooltip or ("Sort by " .. text), 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function(self)
-            self.text:SetTextColor(unpack(COLORS.gold))
-            GameTooltip:Hide()
-        end)
-        
-        btn.field = field
+
+        label:SetTextColor(unpack(COLORS.text))
         return btn
     end
-    
-    bar.headers = {
-        CreateSortButton("Icon", nil, 10, 40, "Pet family icon"),
-        CreateSortButton("Name", "name", 50, 160, "Sort by pet name"),
-        CreateSortButton("Level", "level", 210, 60, "Sort by level"),
-        CreateSortButton("Family", "family", 270, 120, "Sort by family type"),
-        CreateSortButton("Status", nil, 390, 70, "Active or Exotic status"),
-    }
-    
-    -- Action column header
-    local actionLabel = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    actionLabel:SetPoint("LEFT", 520, 0)
-    actionLabel:SetText("Actions")
-    actionLabel:SetTextColor(unpack(COLORS.gold))
-    
-    return bar
-end
 
--- ============================================================================
--- PET ROWS (updated with Call button, no slot #)
--- ============================================================================
+    CreateSortHeader("Name", "name", 36, 210)
+    CreateSortHeader("Lv", "level", 254, 40)
+    CreateSortHeader("Family", "family", 302, 120)
 
-local function CreatePetRow(parent, index)
-    local row = CreateFrame("Button", nil, parent)
-    row:SetSize(FRAME_WIDTH - 20, ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", 10, -((index - 1) * ROW_HEIGHT))
-    
-    local bgColor = index % 2 == 0 and COLORS.rowAlt or COLORS.row
-    CreateBackdrop(row, bgColor, { 0, 0, 0, 0 })
-    
-    row:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(unpack(COLORS.rowHover))
-        if self.petData then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(self.petData.name, 1, 0.82, 0)
-            GameTooltip:AddLine("Level " .. self.petData.level .. " " .. self.petData.family, 1, 1, 1)
-            if self.petData.isExotic then
-                GameTooltip:AddLine("Exotic (requires Beast Mastery)", 0.7, 0.3, 0.9)
+    local refreshBtn = CreateButton(frame, "Refresh", 70, 20)
+    refreshBtn:SetPoint("TOPRIGHT", -90, -32)
+    refreshBtn:SetScript("OnClick", function()
+        HSP.Refresh()
+    end)
+
+    local summonBtn = CreateButton(frame, "Summon", 70, 22)
+    summonBtn:SetPoint("BOTTOMRIGHT", -12, 8)
+    summonBtn:SetScript("OnClick", function()
+        local petId = selectedPet and (selectedPet.petNumber or selectedPet.stableIndex) or selectedPetId
+        if petId then
+            if selectedPet then
+                HSP.AddRecentPet(selectedPet)
             end
-            local fav = HSP.GetFavorite(self.petData.stableIndex)
-            if fav.notes and fav.notes ~= "" then
-                GameTooltip:AddLine("Notes: " .. fav.notes, 0.7, 0.7, 0.7, true)
-            end
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Double-click to summon", 0.3, 1, 0.3)
-            GameTooltip:AddLine("Slot #" .. self.petData.stableIndex, 0.5, 0.5, 0.5)
-            GameTooltip:Show()
+            HSP.SummonPet(petId, selectedPet and selectedPet.name or "pet")
         end
     end)
-    row:SetScript("OnLeave", function(self)
-        if selectedRowIndex == self.index then
-            self:SetBackdropColor(unpack(COLORS.rowSelected))
+    frame.summonBtn = summonBtn
+
+    local dismissBtn = CreateButton(frame, "Dismiss", 70, 22)
+    dismissBtn:SetPoint("RIGHT", summonBtn, "LEFT", -6, 0)
+    dismissBtn:SetScript("OnClick", function()
+        local petId = nil
+        if selectedPet and selectedPet.isActive then
+            petId = selectedPet.petNumber or selectedPet.stableIndex
+        end
+        HSP.DismissPet(petId, selectedPet and selectedPet.name or "pet")
+    end)
+    frame.dismissBtn = dismissBtn
+
+    frame.petList = CreatePetList(frame)
+
+    frame:EnableKeyboard(true)
+    frame:SetScript("OnKeyDown", function(self, key)
+        local listHeight = frame.petList:GetHeight()
+        local maxRows = math.max(1, math.floor(listHeight / ROW_HEIGHT))
+        local pets = HSP.GetVisiblePets(maxRows)
+
+        if key == "ESCAPE" then
+            self:Hide()
+        elseif key == "UP" then
+            if selectedRowIndex > 1 then
+                selectedRowIndex = selectedRowIndex - 1
+            else
+                HSP.ScrollUp(1)
+            end
+            HSP.UpdateUI()
+        elseif key == "DOWN" then
+            if selectedRowIndex < #pets and selectedRowIndex < maxRows then
+                selectedRowIndex = selectedRowIndex + 1
+            else
+                HSP.ScrollDown(1, maxRows)
+            end
+            HSP.UpdateUI()
+        elseif key == "ENTER" then
+            local petId = selectedPet and (selectedPet.petNumber or selectedPet.stableIndex) or selectedPetId
+            if petId then
+                if selectedPet then
+                    HSP.AddRecentPet(selectedPet)
+                end
+                HSP.SummonPet(petId, selectedPet and selectedPet.name or "pet")
+            end
+        end
+    end)
+
+    frame:EnableMouseWheel(true)
+    frame:SetScript("OnMouseWheel", function(self, delta)
+        local listHeight = frame.petList:GetHeight()
+        local maxRows = math.max(1, math.floor(listHeight / ROW_HEIGHT))
+        if delta > 0 then
+            HSP.ScrollUp(3)
         else
-            local bg = self.index % 2 == 0 and COLORS.rowAlt or COLORS.row
-            self:SetBackdropColor(unpack(bg))
+            HSP.ScrollDown(3, maxRows)
         end
-        GameTooltip:Hide()
-    end)
-    
-    row:RegisterForClicks("LeftButtonUp")
-    row.lastClick = 0
-    row:SetScript("OnClick", function(self)
-        if self.petData then
-            local now = GetTime()
-            local isDoubleClick = (now - self.lastClick) < 0.4
-            self.lastClick = now
-            
-            -- Update selection
-            selectedRowIndex = self.index
-            HSP.UpdateUI()
-            
-            if isDoubleClick then
-                HSP.AddRecentPet(self.petData)
-                HSP.SummonPet(self.petData.petNumber or self.petData.stableIndex, self.petData.name)
-            end
-        end
-    end)
-    
-    -- Pet icon (family-based)
-    row.icon = row:CreateTexture(nil, "ARTWORK")
-    row.icon:SetSize(28, 28)
-    row.icon:SetPoint("LEFT", 10, 0)
-    
-    -- Pet name
-    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.name:SetPoint("LEFT", 50, 0)
-    row.name:SetWidth(150)
-    row.name:SetJustifyH("LEFT")
-    
-    -- Level (color-coded)
-    row.level = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.level:SetPoint("LEFT", 210, 0)
-    row.level:SetWidth(50)
-    row.level:SetJustifyH("CENTER")
-    
-    -- Family
-    row.family = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.family:SetPoint("LEFT", 270, 0)
-    row.family:SetWidth(110)
-    row.family:SetJustifyH("LEFT")
-    row.family:SetTextColor(unpack(COLORS.textDim))
-    
-    -- Status badge (exotic/active)
-    row.badge = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.badge:SetPoint("LEFT", 390, 0)
-    row.badge:SetWidth(70)
-    row.badge:SetJustifyH("LEFT")
-    
-    -- Favorite star button
-    row.favBtn = CreateFrame("Button", nil, row)
-    row.favBtn:SetSize(28, 28)
-    row.favBtn:SetPoint("LEFT", 465, 0)
-    row.favBtn.star = row.favBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.favBtn.star:SetPoint("CENTER", 0, 0)
-    row.favBtn.star:SetText("*")
-    row.favBtn.star:SetTextColor(0.4, 0.4, 0.4, 1)
-    row.favBtn:SetScript("OnClick", function(self)
-        local pet = self:GetParent().petData
-        if pet then
-            HSP.ToggleFavorite(pet.stableIndex)
-            HSP.UpdateUI()
-        end
-    end)
-    row.favBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Toggle Favorite", 1, 1, 1)
-        GameTooltip:AddLine("Favorited pets appear in the Favorites panel", 0.7, 0.7, 0.7, true)
-        GameTooltip:Show()
-    end)
-    row.favBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    
-    -- CALL BUTTON (new)
-    row.callBtn = CreateButton(row, "Call", 50, 24, "Summon this pet")
-    row.callBtn:SetPoint("LEFT", 500, 0)
-    row.callBtn:SetScript("OnClick", function(self)
-        local pet = self:GetParent().petData
-        if pet then
-            HSP.AddRecentPet(pet)
-            HSP.SummonPet(pet.petNumber or pet.stableIndex, pet.name)
-        end
-    end)
-
-    row.dismissBtn = CreateButton(row, "Dismiss", 70, 24, "Dismiss active pet")
-    row.dismissBtn:SetPoint("LEFT", 555, 0)
-    row.dismissBtn:SetScript("OnClick", function(self)
-        local pet = self:GetParent().petData
-        if pet then
-            HSP.DismissPet(pet.petNumber or pet.stableIndex, pet.name)
-        end
-    end)
-
-    row.index = index
-    return row
-end
-
-local function CreatePetList(parent)
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(FRAME_WIDTH - 20, ROW_HEIGHT * ROWS_VISIBLE)
-    container:SetPoint("TOP", 0, -HEADER_HEIGHT - FILTER_HEIGHT - 40)
-    
-    -- Empty state message
-    container.emptyMsg = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    container.emptyMsg:SetPoint("CENTER", 0, 0)
-    container.emptyMsg:SetText("|cFF888888No pets found.|r\n\nUse /bmp refresh to load pets from server\nor /bmp add to manually add pets.")
-    container.emptyMsg:SetTextColor(unpack(COLORS.textDim))
-    container.emptyMsg:Hide()
-    
-    container.rows = {}
-    for i = 1, ROWS_VISIBLE do
-        container.rows[i] = CreatePetRow(container, i)
-    end
-    
-    return container
-end
-
--- ============================================================================
--- PAGINATION
--- ============================================================================
-
-local function CreatePagination(parent)
-    local bar = CreateFrame("Frame", nil, parent)
-    bar:SetSize(FRAME_WIDTH - 20, FOOTER_HEIGHT)
-    bar:SetPoint("BOTTOM", 0, 10)
-    CreateBackdrop(bar, COLORS.header, { 0, 0, 0, 0 })
-    
-    -- Previous button
-    bar.prevBtn = CreateButton(bar, "< Prev", 70, 24, "Previous page")
-    bar.prevBtn:SetPoint("LEFT", 10, 0)
-    bar.prevBtn:SetScript("OnClick", function()
-        HSP.PrevPage()
         HSP.UpdateUI()
     end)
-    
-    -- Page info
-    bar.pageInfo = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    bar.pageInfo:SetPoint("CENTER")
-    bar.pageInfo:SetTextColor(unpack(COLORS.text))
-    
-    -- Next button
-    bar.nextBtn = CreateButton(bar, "Next >", 70, 24, "Next page")
-    bar.nextBtn:SetPoint("RIGHT", -10, 0)
-    bar.nextBtn:SetScript("OnClick", function()
-        HSP.NextPage()
+
+    frame:SetScript("OnSizeChanged", function()
+        HSP.RebuildRows()
         HSP.UpdateUI()
     end)
-    
-    -- Items per page dropdown
-    local perPageItems = {
-        { text = "10 per page", value = 10 },
-        { text = "25 per page", value = 25 },
-        { text = "50 per page", value = 50 },
-    }
-    
-    bar.perPageDropdown = CreateDropdown(bar, 100, perPageItems, function(value)
-        BeastmasterPlusCharDB.itemsPerPage = value
-        HSP.SetPage(1)
-        HSP.UpdateUI()
-    end)
-    bar.perPageDropdown:SetPoint("LEFT", bar.prevBtn, "RIGHT", 10, -2)
-    UIDropDownMenu_SetText(bar.perPageDropdown, "25 per page")
-    
-    return bar
+
+    return frame
 end
 
--- ============================================================================
--- FAVORITES PANEL (side panel - fixed)
--- ============================================================================
-
-local function CreateFavoritesPanel(parent)
-    local panel = CreateFrame("Frame", nil, parent)
-    panel:SetSize(220, 350)
-    panel:SetPoint("TOPLEFT", parent, "TOPRIGHT", 5, 0)
-    CreateBackdrop(panel, COLORS.background, COLORS.border)
-    
-    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -10)
-    title:SetText("|cFFFFD100Favorites|r")
-    
-    -- Empty state for favorites
-    panel.emptyMsg = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.emptyMsg:SetPoint("CENTER", 0, 0)
-    panel.emptyMsg:SetText("|cFF888888No favorites yet.|r\n\nClick the star on any pet\nto add it here.")
-    panel.emptyMsg:SetTextColor(unpack(COLORS.textDim))
-    
-    panel.content = CreateFrame("Frame", nil, panel)
-    panel.content:SetSize(200, 280)
-    panel.content:SetPoint("TOP", 0, -35)
-    
-    panel.rows = {}
-    for i = 1, 8 do
-        local row = CreateFrame("Button", nil, panel.content)
-        row:SetSize(200, 32)
-        row:SetPoint("TOP", 0, -((i - 1) * 34))
-        CreateBackdrop(row, COLORS.row, { 0, 0, 0, 0 })
-        
-        row.icon = row:CreateTexture(nil, "ARTWORK")
-        row.icon:SetSize(24, 24)
-        row.icon:SetPoint("LEFT", 5, 0)
-        
-        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.name:SetPoint("LEFT", 35, 0)
-        row.name:SetWidth(110)
-        row.name:SetJustifyH("LEFT")
-        
-        row.callBtn = CreateButton(row, "Call", 45, 20, "Summon this pet")
-        row.callBtn:SetPoint("RIGHT", -5, 0)
-        row.callBtn:GetFontString():SetFont("Fonts\\FRIZQT__.TTF", 9)
-        
-        row:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(unpack(COLORS.rowHover))
-        end)
-        row:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(unpack(COLORS.row))
-        end)
-        
-        row:Hide()
-        panel.rows[i] = row
+local function NormalizeAngle(angle)
+    angle = tonumber(angle) or 0
+    angle = angle % 360
+    if angle < 0 then
+        angle = angle + 360
     end
-    
-    panel:Hide()
-    return panel
+    return angle
 end
-
--- ============================================================================
--- RECENT PETS PANEL
--- ============================================================================
-
-local function CreateRecentPanel(parent)
-    local panel = CreateFrame("Frame", nil, parent)
-    panel:SetSize(220, 200)
-    panel:SetPoint("TOPLEFT", parent, "TOPRIGHT", 5, -360)
-    CreateBackdrop(panel, COLORS.background, COLORS.border)
-    
-    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -10)
-    title:SetText("|cFFFFD100Recent|r")
-    
-    panel.emptyMsg = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    panel.emptyMsg:SetPoint("CENTER", 0, 0)
-    panel.emptyMsg:SetText("|cFF888888No recent pets.|r")
-    panel.emptyMsg:SetTextColor(unpack(COLORS.textDim))
-    
-    panel.rows = {}
-    for i = 1, 5 do
-        local row = CreateFrame("Button", nil, panel)
-        row:SetSize(200, 28)
-        row:SetPoint("TOP", 0, -30 - ((i - 1) * 30))
-        CreateBackdrop(row, COLORS.row, { 0, 0, 0, 0 })
-        
-        row.icon = row:CreateTexture(nil, "ARTWORK")
-        row.icon:SetSize(22, 22)
-        row.icon:SetPoint("LEFT", 5, 0)
-        
-        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.name:SetPoint("LEFT", 32, 0)
-        row.name:SetWidth(110)
-        row.name:SetJustifyH("LEFT")
-        
-        row.callBtn = CreateButton(row, "Call", 45, 20, "Summon this pet")
-        row.callBtn:SetPoint("RIGHT", -5, 0)
-        row.callBtn:GetFontString():SetFont("Fonts\\FRIZQT__.TTF", 9)
-        
-        row:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(unpack(COLORS.rowHover))
-        end)
-        row:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(unpack(COLORS.row))
-        end)
-        
-        row:Hide()
-        panel.rows[i] = row
-    end
-    
-    panel:Hide()
-    return panel
-end
-
--- ============================================================================
--- MINIMAP BUTTON
--- ============================================================================
 
 local function CreateMinimapButton()
-    local btn = CreateFrame("Button", "BeastmasterPlusMinimapButton", Minimap)
-    btn:SetSize(32, 32)
+    local btn = CreateFrame("Button", "BeastmasterPlusMinimapButton", MinimapCluster or Minimap)
+    btn:SetSize(MINIMAP_BUTTON_SIZE, MINIMAP_BUTTON_SIZE)
     btn:SetFrameStrata("MEDIUM")
-    btn:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 0, 0)
+    btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    local highlight = btn:GetHighlightTexture()
+    if highlight then
+        highlight:ClearAllPoints()
+        highlight:SetPoint("TOPLEFT", btn, "TOPLEFT", MINIMAP_HIGHLIGHT_OFFSET_X, MINIMAP_HIGHLIGHT_OFFSET_Y)
+        highlight:SetSize(MINIMAP_BUTTON_SIZE, MINIMAP_BUTTON_SIZE)
+    end
     btn:SetMovable(true)
     btn:EnableMouse(true)
-    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:RegisterForClicks("AnyUp")
     btn:RegisterForDrag("LeftButton")
-    
-    btn:SetNormalTexture("Interface\\Icons\\Ability_Hunter_BeastCall")
-    btn:GetNormalTexture():SetSize(20, 20)
-    btn:GetNormalTexture():SetPoint("CENTER")
-    
-    local overlay = btn:CreateTexture(nil, "OVERLAY")
-    overlay:SetSize(54, 54)
-    overlay:SetPoint("CENTER")
-    overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    
+
     local bg = btn:CreateTexture(nil, "BACKGROUND")
-    bg:SetSize(24, 24)
-    bg:SetPoint("CENTER")
+    bg:SetSize(MINIMAP_BG_SIZE, MINIMAP_BG_SIZE)
+    bg:SetPoint("CENTER", MINIMAP_ICON_OFFSET_X, MINIMAP_ICON_OFFSET_Y)
     bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-    
-    -- Drag functionality (around minimap edge)
-    local minimapShape = GetMinimapShape and GetMinimapShape() or "ROUND"
-    local angle = 45
-    
+
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(MINIMAP_ICON_SIZE, MINIMAP_ICON_SIZE)
+    icon:SetPoint("CENTER", MINIMAP_ICON_OFFSET_X, MINIMAP_ICON_OFFSET_Y)
+    icon:SetTexture("Interface\\Icons\\Ability_Hunter_BeastCall")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    btn.icon = icon
+
+    local border = btn:CreateTexture(nil, "OVERLAY")
+    border:SetSize(MINIMAP_BORDER_SIZE, MINIMAP_BORDER_SIZE)
+    border:SetPoint("TOPLEFT", btn, "TOPLEFT", MINIMAP_BORDER_OFFSET_X, MINIMAP_BORDER_OFFSET_Y)
+    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+
+    local angle = NormalizeAngle(BeastmasterPlusCharDB.minimapAngle or 225)
+
     local function UpdatePosition()
-        local radius = (Minimap:GetWidth() / 2) + 5
+        if not Minimap then return end
+        local minimapWidth = Minimap:GetWidth() or 0
+        local minimapHeight = Minimap:GetHeight() or 0
+        local minimapRadius = math.min(minimapWidth, minimapHeight) / 2
+        local radius = minimapRadius + 12
         local x = math.cos(math.rad(angle)) * radius
         local y = math.sin(math.rad(angle)) * radius
         btn:ClearAllPoints()
         btn:SetPoint("CENTER", Minimap, "CENTER", x, y)
     end
-    
+
     btn:SetScript("OnDragStart", function(self)
         self.dragging = true
     end)
-    
+
     btn:SetScript("OnDragStop", function(self)
         self.dragging = false
+        angle = NormalizeAngle(angle)
+        BeastmasterPlusCharDB.minimapAngle = angle
+        UpdatePosition()
     end)
-    
+
     btn:SetScript("OnUpdate", function(self)
         if self.dragging then
             local mx, my = Minimap:GetCenter()
             local cx, cy = GetCursorPosition()
             local scale = Minimap:GetEffectiveScale()
             cx, cy = cx / scale, cy / scale
-            angle = math.deg(math.atan2(cy - my, cx - mx))
+            angle = NormalizeAngle(math.deg(math.atan2(cy - my, cx - mx)))
             UpdatePosition()
         end
     end)
-    
+
     btn:SetScript("OnClick", function(self, button)
         if button == "LeftButton" then
-            HSP.Toggle()
+            if HSP.MainFrame then
+                if HSP.MainFrame:IsShown() then
+                    HSP.MainFrame:Hide()
+                else
+                    HSP.MainFrame:Show()
+                    HSP.UpdateUI()
+                end
+            end
         elseif button == "RightButton" then
             HSP.RequestPetList()
         end
     end)
-    
-    btn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("Beastmaster Plus", 1, 0.82, 0)
-        GameTooltip:AddLine("Left-click: Open pet manager", 1, 1, 1)
-        GameTooltip:AddLine("Right-click: Refresh pet list", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    
-    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    
+
     UpdatePosition()
     return btn
 end
 
--- ============================================================================
--- UPDATE UI
--- ============================================================================
+function HSP.Toggle()
+    local _, playerClass = UnitClass("player")
+    if playerClass ~= "HUNTER" then
+        return
+    end
 
-function HSP.UpdateUI()
-    local frame = HSP.MainFrame
-    if not frame or not frame:IsShown() then return end
-    
-    local pets, currentPage, totalPages, totalPets = HSP.GetPets()
-    local allPets = HSP.GetAllPets and HSP.GetAllPets() or {}
-    
-    -- Update pet count with filter status
-    local filterList = HSP.GetActiveFilters and HSP.GetActiveFilters() or {}
-    frame.petCount:SetText(totalPets .. " of " .. #allPets .. " pets")
-    if #filterList > 0 then
-        frame.filterStatus:SetText("(" .. table.concat(filterList, ", ") .. ")")
-    else
-        frame.filterStatus:SetText("")
-    end
-    
-    -- Update quick filter button states
-    local db = BeastmasterPlusCharDB
-    if frame.filterBar then
-        if db.filterExoticOnly then
-            frame.filterBar.exoticBtn:SetText("|cFFFFD100Exotic|r")
+    if HSP.MainFrame then
+        if HSP.MainFrame:IsShown() then
+            HSP.MainFrame:Hide()
         else
-            frame.filterBar.exoticBtn:SetText("Exotic")
-        end
-        if db.filterMinLevel == 80 then
-            frame.filterBar.maxLevelBtn:SetText("|cFFFFD100Lv 80|r")
-        else
-            frame.filterBar.maxLevelBtn:SetText("Lv 80")
-        end
-    end
-    
-    -- Show/hide empty state
-    if #pets == 0 then
-        frame.petList.emptyMsg:Show()
-    else
-        frame.petList.emptyMsg:Hide()
-    end
-    
-    -- Update rows
-    for i, row in ipairs(frame.petList.rows) do
-        local pet = pets[i]
-        if pet then
-            row:Show()
-            row.petData = pet
-            row.name:SetText(pet.name)
-            
-            -- Level with color coding
-            row.level:SetText(pet.level)
-            row.level:SetTextColor(unpack(GetLevelColor(pet.level)))
-            
-            row.family:SetText(pet.family)
-            
-            -- Icon (family-based)
-            local iconPath = GetFamilyIcon(pet.family)
-            row.icon:SetTexture(iconPath)
-            
-            -- Badge (exotic/active)
-            if pet.isActive then
-                row.badge:SetText("|cFF00FF00Active|r")
-            elseif pet.isExotic then
-                row.badge:SetText("|cFF9933FFExotic|r")
-            else
-                row.badge:SetText("")
-            end
-            
-            -- Favorite star
-            local fav = HSP.GetFavorite(pet.stableIndex)
-            if fav.isFavorite then
-                row.favBtn.star:SetText("*")
-                row.favBtn.star:SetTextColor(1, 0.82, 0.2, 1)
-                row.favBtn.star:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
-            else
-                row.favBtn.star:SetText("*")
-                row.favBtn.star:SetTextColor(0.4, 0.4, 0.4, 1)
-                row.favBtn.star:SetFont("Fonts\\FRIZQT__.TTF", 18, "")
-            end
-            
-            -- Selection highlight
-            if selectedRowIndex == i then
-                row:SetBackdropColor(unpack(COLORS.rowSelected))
-            else
-                local bg = i % 2 == 0 and COLORS.rowAlt or COLORS.row
-                row:SetBackdropColor(unpack(bg))
-            end
-        else
-            row:Hide()
-        end
-    end
-    
-    -- Update pagination
-    frame.pagination.pageInfo:SetText(string.format("Page %d of %d", currentPage, math.max(1, totalPages)))
-    frame.pagination.prevBtn:SetEnabled(currentPage > 1)
-    frame.pagination.nextBtn:SetEnabled(currentPage < totalPages)
-    
-    -- Update favorites panel
-    local favIndex = 1
-    local hasFavorites = false
-    for _, pet in ipairs(allPets) do
-        local fav = HSP.GetFavorite(pet.stableIndex)
-        if fav.isFavorite and frame.favPanel.rows[favIndex] then
-            hasFavorites = true
-            local row = frame.favPanel.rows[favIndex]
-            row.icon:SetTexture(GetFamilyIcon(pet.family))
-            row.name:SetText(pet.name .. " |cFF666666Lv" .. pet.level .. "|r")
-            row.petData = pet
-            row.callBtn:SetScript("OnClick", function()
-                HSP.AddRecentPet(pet)
-                HSP.SummonPet(pet.petNumber or pet.stableIndex, pet.name)
-            end)
-            row:Show()
-            favIndex = favIndex + 1
-        end
-    end
-    for i = favIndex, #frame.favPanel.rows do
-        frame.favPanel.rows[i]:Hide()
-    end
-    frame.favPanel.emptyMsg:SetShown(not hasFavorites)
-    
-    -- Update recent pets panel
-    local recentPets = HSP.GetRecentPets and HSP.GetRecentPets() or {}
-    local hasRecent = #recentPets > 0
-    for i, row in ipairs(frame.recentPanel.rows) do
-        local pet = recentPets[i]
-        if pet then
-            row.icon:SetTexture(GetFamilyIcon(pet.family))
-            row.name:SetText(pet.name)
-            row.petData = pet
-            row.callBtn:SetScript("OnClick", function()
-                HSP.SummonPet(pet.petNumber, pet.name)
-            end)
-            row:Show()
-        else
-            row:Hide()
-        end
-    end
-    frame.recentPanel.emptyMsg:SetShown(not hasRecent)
-    
-    -- Update sort arrows
-    if frame.sortHeaders then
-        for _, header in ipairs(frame.sortHeaders.headers) do
-            if header.field and header.field == db.sortBy then
-                header.arrow:SetText(db.sortOrder == "asc" and " ^" or " v")
-            else
-                header.arrow:SetText("")
-            end
+            HSP.MainFrame:Show()
+            HSP.UpdateUI()
         end
     end
 end
-
--- ============================================================================
--- INITIALIZE UI
--- ============================================================================
 
 local function InitializeUI()
-    local success, err = pcall(function()
-        local frame = CreateMainFrame()
-        frame.filterBar = CreateFilterBar(frame)
-        frame.sortHeaders = CreateSortHeaders(frame)
-        frame.petList = CreatePetList(frame)
-        frame.pagination = CreatePagination(frame)
-        frame.favPanel = CreateFavoritesPanel(frame)
-        frame.recentPanel = CreateRecentPanel(frame)
-        
-        frame:Hide()
-        HSP.MainFrame = frame
-        
-        -- Refresh button
-        local refreshBtn = CreateButton(frame, "Refresh", 70, 22, "Fetch pets from server")
-        refreshBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -140, -8)
-        refreshBtn:SetScript("OnClick", function()
-            HSP.Refresh()
-        end)
-        
-        -- Toggle favorites panel
-        local favToggle = CreateButton(frame, "Favorites", 80, 22, "Show/hide favorites panel")
-        favToggle:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -50, -8)
-        favToggle:SetScript("OnClick", function()
-            local showFav = not frame.favPanel:IsShown()
-            frame.favPanel:SetShown(showFav)
-            frame.recentPanel:SetShown(showFav)
-            if showFav then HSP.UpdateUI() end
-        end)
-        
-        -- Create minimap button
-        CreateMinimapButton()
-    end)
-    
-    if success then
-        print("|cFFFFD100Beastmaster Plus:|r UI ready. Type /bmp or use minimap button.")
-    else
-        print("|cFFFF0000Beastmaster Plus ERROR:|r " .. tostring(err))
+    local _, playerClass = UnitClass("player")
+    if playerClass ~= "HUNTER" then
+        return
     end
+
+    local frame = CreateMainFrame()
+    frame:Hide()
+    HSP.MainFrame = frame
+
+    frame:HookScript("OnShow", function()
+        if #frame.petList.rows == 0 then
+            HSP.RebuildRows()
+        end
+        HSP.UpdateUI()
+    end)
+
+    CreateMinimapButton()
 end
 
-InitializeUI()
+local initFrame = CreateFrame("Frame")
+initFrame:RegisterEvent("PLAYER_LOGIN")
+initFrame:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_LOGIN")
+    InitializeUI()
+end)

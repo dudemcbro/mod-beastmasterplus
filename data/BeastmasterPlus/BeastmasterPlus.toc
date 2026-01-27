@@ -7,6 +7,7 @@
 ## SavedVariablesPerCharacter: BeastmasterPlusCharDB
 
 # Core logic
+BeastmasterPlusFamilyMap.lua
 BeastmasterPlus.lua
 
 # User interface

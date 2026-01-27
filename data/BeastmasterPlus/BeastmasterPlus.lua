@@ -1,35 +1,83 @@
--- Beastmaster Plus
--- Manage up to 99 stabled hunter pets
--- Requires custom server/client with extended stable API
+-- ============================================================================
+-- BEASTMASTER PLUS - Core Logic
+-- WoW 3.3.5a (WotLK) Addon for managing 99+ stabled hunter pets
+-- ============================================================================
 
 local addonName, HSP = ...
 
--- Raw debug handler removed - was causing log spam and potential instability
-
--- Saved variables (loaded after ADDON_LOADED event)
+-- SavedVariables
 BeastmasterPlusDB = BeastmasterPlusDB or {}
 BeastmasterPlusCharDB = BeastmasterPlusCharDB or {}
 
--- Default settings
 local defaults = {
-    favorites = {},      -- [stableIndex] = { isFavorite = bool, notes = string }
-    sortBy = "name",     -- "name", "level", "family"
-    sortOrder = "asc",   -- "asc", "desc"
-    itemsPerPage = 25,
+    favorites = {},
+    sortBy = "name",
+    sortOrder = "asc",
     filterFamily = nil,
     filterExoticOnly = false,
+    filterFavoritesOnly = false,
     filterMinLevel = 1,
     filterMaxLevel = 80,
+    frameWidth = 600,
+    frameHeight = 500,
+    minimapAngle = 225,
+    itemsPerPage = 25,
+    compactMode = false,
 }
 
--- Pet family list (WotLK 3.3.5a)
+-- Pet family ID to name mapping (from WoW 3.3.5a CreatureFamily.dbc)
 local PET_FAMILIES = {
+    [1] = "Wolf",
+    [2] = "Cat",
+    [3] = "Spider",
+    [4] = "Bear",
+    [5] = "Boar",
+    [6] = "Crocolisk",
+    [7] = "Carrion Bird",
+    [8] = "Crab",
+    [9] = "Gorilla",
+    [11] = "Raptor",
+    [12] = "Tallstrider",
+    [15] = "Felhunter",
+    [16] = "Voidwalker",
+    [17] = "Succubus",
+    [19] = "Doomguard",
+    [20] = "Scorpid",
+    [21] = "Turtle",
+    [23] = "Imp",
+    [24] = "Bat",
+    [25] = "Hyena",
+    [26] = "Bird of Prey",
+    [27] = "Wind Serpent",
+    [28] = "Remote Control",
+    [29] = "Felguard",
+    [30] = "Dragonhawk",
+    [31] = "Ravager",
+    [32] = "Warp Stalker",
+    [33] = "Sporebat",
+    [34] = "Nether Ray",
+    [35] = "Serpent",
+    [37] = "Moth",
+    [38] = "Chimaera",
+    [39] = "Devilsaur",
+    [40] = "Ghoul",
+    [41] = "Silithid",
+    [42] = "Worm",
+    [43] = "Rhino",
+    [44] = "Wasp",
+    [45] = "Core Hound",
+    [46] = "Spirit Beast",
+}
+
+-- Also keep a name-indexed list for UI display
+local PET_FAMILY_NAMES = {
     "Bat", "Bear", "Bird of Prey", "Boar", "Carrion Bird", "Cat",
     "Chimaera", "Core Hound", "Crab", "Crocolisk", "Devilsaur",
-    "Dragonhawk", "Gorilla", "Hyena", "Moth", "Nether Ray",
-    "Raptor", "Ravager", "Rhino", "Scorpid", "Serpent", "Silithid",
-    "Spider", "Spirit Beast", "Sporebat", "Tallstrider", "Turtle",
-    "Warp Stalker", "Wasp", "Wind Serpent", "Wolf", "Worm"
+    "Doomguard", "Dragonhawk", "Felhunter", "Felguard", "Ghoul",
+    "Gorilla", "Hyena", "Imp", "Moth", "Nether Ray", "Raptor",
+    "Ravager", "Rhino", "Scorpid", "Serpent", "Silithid", "Spider",
+    "Spirit Beast", "Sporebat", "Succubus", "Tallstrider", "Turtle",
+    "Voidwalker", "Warp Stalker", "Wasp", "Wind Serpent", "Wolf", "Worm"
 }
 
 -- Exotic families (require Beast Mastery)
@@ -44,12 +92,14 @@ local EXOTIC_FAMILIES = {
 
 -- Expose to HSP namespace immediately (needed by UI file)
 HSP.PET_FAMILIES = PET_FAMILIES
+HSP.PET_FAMILY_NAMES = PET_FAMILY_NAMES
 HSP.EXOTIC_FAMILIES = EXOTIC_FAMILIES
 
 -- Local state
 local pets = {}
-local currentPage = 1
 local searchText = ""
+local scrollOffset = 0
+local currentPage = 1
 local isLoaded = false
 local debugMode = false
 local logHistory = {}
@@ -97,13 +147,11 @@ local function Log(level, message, ...)
     end
     local entry = string.format("[%s] [%s] %s", timestamp, level, formatted or "nil")
     
-    -- Store in history
     table.insert(logHistory, entry)
     if #logHistory > MAX_LOG_HISTORY then
         table.remove(logHistory, 1)
     end
     
-    -- Print based on level
     if level == "ERROR" then
         print("|cFFFF0000BMP ERROR:|r " .. (formatted or "nil"))
     elseif level == "WARN" then
@@ -143,40 +191,11 @@ function HSP.DumpPetData()
     print("|cFFFFD100=== BMP Pet Data Dump ===|r")
     print("Total raw pets: " .. #pets)
     for i, pet in ipairs(pets) do
-        print(string.format("  [%d] Slot:%d Name:%s Lvl:%s Family:%s Icon:%s", 
+        print(string.format("  [%d] Slot:%d Name:%s Lvl:%s Family:%s", 
             i, pet.stableIndex or 0, tostring(pet.name), tostring(pet.level), 
-            tostring(pet.family), pet.icon and "yes" or "nil"))
+            tostring(pet.family)))
     end
     print("|cFFFFD100=== End Dump ===|r")
-end
-
--- ============================================================================
--- CUSTOM SERVER API FUNCTIONS
--- These functions must be implemented by your custom WoW server/client
--- The default WoW 3.3.5a client only supports 5 stable slots
--- ============================================================================
-
--- Check if custom API is available
-local function HasCustomAPI()
-    return type(HSP_GetStablePetInfo) == "function"
-end
-
--- Get pet info from custom stable slot (1-99)
--- Returns: name, level, family, icon, isExotic, isActive
-local function GetExtendedStablePetInfo(index)
-    if HasCustomAPI() then
-        Debug("Using custom API for slot %d", index)
-        return HSP_GetStablePetInfo(index)
-    end
-    -- Try standard API for any slot (some servers support higher indices)
-    -- GetStablePetInfo returns: icon, name, level, petType, talent
-    local icon, name, level, petType, talent = GetStablePetInfo(index)
-    if name then
-        Debug("Slot %d: icon=%s, name=%s, level=%s, type=%s", 
-            index, tostring(icon), tostring(name), tostring(level), tostring(petType))
-        return name, level or 1, petType or "Unknown", icon, false, false
-    end
-    return nil
 end
 
 -- ============================================================================
@@ -184,19 +203,28 @@ end
 -- ============================================================================
 local ADDON_PREFIX = "BMP"
 
--- Buffer for multi-part messages (declared early so all functions can access)
+-- Buffer for multi-part messages
 local messageBuffer = ""
 local bufferTimeout = 0
 
+local function AppendPetData(chunk)
+    if not chunk or chunk == "" then
+        return
+    end
+    if messageBuffer ~= "" and messageBuffer:sub(-1) ~= ";" and chunk:sub(1, 1) ~= ";" then
+        messageBuffer = messageBuffer .. ";" .. chunk
+    else
+        messageBuffer = messageBuffer .. chunk
+    end
+end
+
 -- Send summon request to server via addon message
--- WoW combines: prefix + "\t" + message -> server sees "BMP\tSUMMON|<petNumber>"
 function HSP.SummonPet(petNumber, petName)
     if not petNumber then
         Warn("Cannot summon: missing pet ID")
         return
     end
     
-    -- Just send the command - WoW automatically prepends "BMP\t"
     local msg = "SUMMON|" .. tostring(petNumber)
     Info("Sending summon request: prefix=BMP, message=%s", msg)
     SendAddonMessage(ADDON_PREFIX, msg, "WHISPER", UnitName("player"))
@@ -204,17 +232,91 @@ function HSP.SummonPet(petNumber, petName)
 end
 
 -- Send dismiss request to server via addon message
--- WoW combines: prefix + "\t" + message -> server sees "BMP\tDISMISS|<petNumber>"
+-- WoW combines: prefix + "\t" + message -> server sees "BMP\tDISMISS" or "BMP\tDISMISS|<petNumber>"
 function HSP.DismissPet(petNumber, petName)
-    if not petNumber then
-        Warn("Cannot dismiss: missing pet ID")
-        return
+    local msg = "DISMISS"
+    if petNumber then
+        msg = "DISMISS|" .. tostring(petNumber)
     end
-
-    local msg = "DISMISS|" .. tostring(petNumber)
     Info("Sending dismiss request: prefix=BMP, message=%s", msg)
     SendAddonMessage(ADDON_PREFIX, msg, "WHISPER", UnitName("player"))
     print("|cFFFFD100BMP:|r Dismissing " .. (petName or "pet") .. "...")
+end
+
+local function EnsurePetTalentUI()
+    if TogglePetTalentFrame or PetTalentFrame_Toggle or PetTalentFrame then
+        return true
+    end
+
+    local addons = { "Blizzard_PetTalentUI", "Blizzard_PetTalents", "Blizzard_TalentUI" }
+    for _, addon in ipairs(addons) do
+        if IsAddOnLoaded and LoadAddOn and not IsAddOnLoaded(addon) then
+            LoadAddOn(addon)
+        end
+    end
+
+    if type(TalentFrame_LoadUI) == "function" then
+        TalentFrame_LoadUI()
+    end
+    if type(PetTalentFrame_LoadUI) == "function" then
+        PetTalentFrame_LoadUI()
+    end
+
+    return TogglePetTalentFrame or PetTalentFrame_Toggle or PetTalentFrame
+end
+
+local function ShowPetTalentTab()
+    if not TalentFrame or not TalentFrameTab_OnClick then
+        return false
+    end
+    local tabId = TALENTFRAME_TABID_PET or 3
+    local tab = _G["TalentFrameTab" .. tabId]
+    if not tab then
+        return false
+    end
+    TalentFrameTab_OnClick(tab)
+    return true
+end
+
+-- Open pet talents (client-side)
+function HSP.OpenPetTalents()
+    if UnitExists("pet") then
+        EnsurePetTalentUI()
+        -- WotLK 3.3.5a uses TogglePetTalentFrame() for pet talents
+        if TogglePetTalentFrame then
+            TogglePetTalentFrame()
+            ShowPetTalentTab()
+        elseif PetTalentFrame_Toggle then
+            PetTalentFrame_Toggle()
+        elseif PetTalentFrame then
+            if PetTalentFrame:IsShown() then
+                PetTalentFrame:Hide()
+            else
+                PetTalentFrame:Show()
+            end
+        elseif ToggleTalentFrame then
+            ToggleTalentFrame()
+            if not ShowPetTalentTab() then
+                if TalentFrame and TalentFrame:IsShown() then
+                    TalentFrame:Hide()
+                end
+                Warn("Pet talent frame not available.")
+            end
+        else
+            Warn("Pet talent frame not available.")
+        end
+    else
+        Warn("You must have a pet summoned to view talents.")
+    end
+end
+
+-- Open pet spellbook (client-side)
+function HSP.OpenPetSpellbook()
+    if UnitExists("pet") then
+        ToggleSpellBook(BOOKTYPE_PET)
+    else
+        Warn("You must have a pet summoned to view spells.")
+    end
 end
 
 -- Request pet list from server
@@ -227,7 +329,6 @@ function HSP.RequestPetList()
         return
     end
     
-    -- Anti-spam: refuse if we sent a request recently
     local now = GetTime()
     if now - lastListRequest < LIST_COOLDOWN then
         Debug("RequestPetList: cooldown active, skipping (%.1fs remaining)", LIST_COOLDOWN - (now - lastListRequest))
@@ -236,39 +337,31 @@ function HSP.RequestPetList()
     lastListRequest = now
     
     Info("Requesting pet list from server: prefix=%s, message=LIST", ADDON_PREFIX)
-    -- Clear any pending buffer from previous requests
     messageBuffer = ""
     bufferTimeout = 0
     chunkCount = 0
-    listCompleted = false  -- Reset completion flag for new request
-    -- Just send "LIST" - WoW automatically prepends "BMP\t"
+    listCompleted = false
     SendAddonMessage(ADDON_PREFIX, "LIST", "WHISPER", target)
 end
 
--- Refresh from server (requests new data, doesn't clear existing until new data arrives)
+-- Refresh from server
 function HSP.Refresh()
     Info("Requesting fresh data from server...")
-    -- Request fresh data - existing pets remain visible until new data arrives
     HSP.RequestPetList()
 end
 
--- Clear cache and refresh from server (use for full reset)
+-- Clear cache and refresh from server
 function HSP.ClearAndRefresh()
-    -- Clear local pet list
     pets = {}
-    -- Clear saved cache
     BeastmasterPlusCharDB.petCache = {}
     BeastmasterPlusCharDB.cacheTime = nil
-    -- Clear manual pets too
     BeastmasterPlusCharDB.manualPets = {}
     Info("Cache and manual pets cleared. Requesting fresh data from server...")
-    -- Reset to page 1
+    scrollOffset = 0
     currentPage = 1
-    -- Update UI to show empty state
     if HSP.MainFrame and HSP.MainFrame:IsShown() then
         HSP.UpdateUI()
     end
-    -- Request fresh data from server
     HSP.RequestPetList()
 end
 
@@ -285,22 +378,29 @@ local FAMILY_ICONS = {
     ["Crab"] = "Interface\\Icons\\Ability_Hunter_Pet_Crab",
     ["Crocolisk"] = "Interface\\Icons\\Ability_Hunter_Pet_Crocolisk",
     ["Devilsaur"] = "Interface\\Icons\\Ability_Hunter_Pet_Devilsaur",
+    ["Doomguard"] = "Interface\\Icons\\Spell_Shadow_SummonDoomGuard",
     ["Dragonhawk"] = "Interface\\Icons\\Ability_Hunter_Pet_DragonHawk",
+    ["Felhunter"] = "Interface\\Icons\\Spell_Shadow_SummonFelHunter",
+    ["Felguard"] = "Interface\\Icons\\Spell_Shadow_SummonFelGuard",
+    ["Ghoul"] = "Interface\\Icons\\Ability_Creature_Cursed_05",
     ["Gorilla"] = "Interface\\Icons\\Ability_Hunter_Pet_Gorilla",
     ["Hyena"] = "Interface\\Icons\\Ability_Hunter_Pet_Hyena",
+    ["Imp"] = "Interface\\Icons\\Spell_Shadow_SummonImp",
     ["Moth"] = "Interface\\Icons\\Ability_Hunter_Pet_Moth",
     ["Nether Ray"] = "Interface\\Icons\\Ability_Hunter_Pet_NetherRay",
     ["Raptor"] = "Interface\\Icons\\Ability_Hunter_Pet_Raptor",
     ["Ravager"] = "Interface\\Icons\\Ability_Hunter_Pet_Ravager",
     ["Rhino"] = "Interface\\Icons\\Ability_Hunter_Pet_Rhino",
     ["Scorpid"] = "Interface\\Icons\\Ability_Hunter_Pet_Scorpid",
-    ["Serpent"] = "Interface\\Icons\\Ability_Hunter_Pet_Serpent",
+    ["Serpent"] = "Interface\\Icons\\Spell_Nature_GuardianWard",
     ["Silithid"] = "Interface\\Icons\\Ability_Hunter_Pet_Silithid",
     ["Spider"] = "Interface\\Icons\\Ability_Hunter_Pet_Spider",
-    ["Spirit Beast"] = "Interface\\Icons\\Ability_Hunter_Pet_SpiritBeast",
+    ["Spirit Beast"] = "Interface\\Icons\\Ability_Druid_PrimalPrecision",
     ["Sporebat"] = "Interface\\Icons\\Ability_Hunter_Pet_Sporebat",
+    ["Succubus"] = "Interface\\Icons\\Spell_Shadow_SummonSuccubus",
     ["Tallstrider"] = "Interface\\Icons\\Ability_Hunter_Pet_TallStrider",
     ["Turtle"] = "Interface\\Icons\\Ability_Hunter_Pet_Turtle",
+    ["Voidwalker"] = "Interface\\Icons\\Spell_Shadow_SummonVoidWalker",
     ["Warp Stalker"] = "Interface\\Icons\\Ability_Hunter_Pet_WarpStalker",
     ["Wasp"] = "Interface\\Icons\\Ability_Hunter_Pet_Wasp",
     ["Wind Serpent"] = "Interface\\Icons\\Ability_Hunter_Pet_WindSerpent",
@@ -309,34 +409,59 @@ local FAMILY_ICONS = {
     ["Unknown"] = "Interface\\Icons\\INV_Misc_QuestionMark",
 }
 
--- Get icon for a pet family
+HSP.FAMILY_ICONS = FAMILY_ICONS
+
 local function GetFamilyIcon(family)
     return FAMILY_ICONS[family] or FAMILY_ICONS["Unknown"]
 end
 
+local function ResolveFamily(creatureId, familyId)
+    local resolvedId = tonumber(familyId)
+    if not resolvedId or resolvedId == 0 then
+        local entry = tonumber(creatureId)
+        if entry and HSP.PET_ENTRY_FAMILY then
+            resolvedId = HSP.PET_ENTRY_FAMILY[entry]
+        end
+    end
+    return PET_FAMILIES[resolvedId] or "Unknown", resolvedId
+end
+
 -- Parse pet data from server response
--- Expected format: Slot|CreatureId|Level|Name|Flags (semicolon delimited)
+-- NEW format: Slot|CreatureId|Level|Name|Flags|FamilyId (6 fields)
 function HSP.ParseServerPetData(message)
     local serverPets = {}
-    local seenSlots = {} -- Track already-added slots to prevent duplicates
+    local seenSlots = {}
     
-    -- Handle multiple pets separated by semicolons
     for petData in message:gmatch("[^;]+") do
-        local slot, creatureId, level, name, flags = petData:match("(%d+)|(%d+)|(%d+)|([^|]+)|(%d+)")
+        -- Try 6-field format first (new server payload with familyId)
+        -- Use [^|]* to allow empty names
+        local slot, creatureId, level, name, flags, familyId = petData:match("(%d+)|(%d+)|(%d+)|([^|]*)|(%d+)|(%d+)")
+        
+        -- Fallback to 5-field format (old server payload)
+        if not slot then
+            slot, creatureId, level, name, flags = petData:match("(%d+)|(%d+)|(%d+)|([^|]*)|(%d+)")
+            familyId = nil
+        end
+        
         if slot then
             local slotNum = tonumber(slot)
-            -- Only add if we haven't seen this slot yet
             if not seenSlots[slotNum] then
                 seenSlots[slotNum] = true
                 local isActive = (tonumber(flags) or 0) > 0
-                local family = HSP.GetFamilyFromCreature(tonumber(creatureId)) or "Unknown"
+                
+                -- Resolve family from familyId or fallback to entry->family map
+                local family = ResolveFamily(creatureId, familyId)
+                
+                -- Ensure name has a fallback if empty
+                local petName = (name and name ~= "") and tostring(name) or ("Slot " .. slotNum)
+                
                 table.insert(serverPets, {
                     petNumber = slotNum,
                     creatureId = tonumber(creatureId),
-                    level = tonumber(level),
-                    name = name,
+                    level = tonumber(level) or 1,
+                    name = petName,
                     isActive = isActive,
-                    stableIndex = slotNum, -- Use actual slot from server
+                    stableIndex = slotNum,
                     family = family,
                     icon = GetFamilyIcon(family),
                     isExotic = EXOTIC_FAMILIES[family] or false,
@@ -357,9 +482,8 @@ function HSP.ProcessPetBuffer()
             pets = serverPets
             SavePetCache()
             Info("Loaded %d pets from server", #serverPets)
-            -- Always print confirmation (visible proof that pets loaded)
             print("|cFF00FF00BMP:|r Loaded " .. #pets .. " pets")
-            -- Reset to page 1 when new data loads
+            scrollOffset = 0
             currentPage = 1
             if HSP.MainFrame and HSP.MainFrame:IsShown() then
                 HSP.UpdateUI()
@@ -369,37 +493,26 @@ function HSP.ProcessPetBuffer()
     end
 end
 
--- Get family name from creature ID (basic mapping)
-function HSP.GetFamilyFromCreature(creatureId)
-    -- This could be expanded with a full mapping table
-    -- For now return nil to use "Unknown"
-    return nil
-end
-
 -- Handle server payload (called from OnAddonMessage after filtering)
 function HSP.HandleServerPayload(msg)
     if not msg or msg == "" then return end
     
-    -- Debug print to show receipt
     if debugMode then
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FFFF[BMP RX]|r " .. tostring(msg):sub(1, 80))
     end
     
     if msg:find("^PETS|") then
-        -- Server sent pet list: PETS|petNumber|creatureId|level|name|flags;...
-        local petData = msg:sub(6) -- Remove "PETS|" prefix
-        messageBuffer = messageBuffer .. petData
+        local petData = msg:sub(6)
+        AppendPetData(petData)
         bufferTimeout = GetTime() + 0.5
         HSP.ProcessPetBuffer()
         
     elseif msg:find("^PETS_CHUNK|") then
-        -- Chunked message: PETS_CHUNK|<data> (more coming)
         local petData = msg:sub(12)
-        messageBuffer = messageBuffer .. petData
+        AppendPetData(petData)
         chunkCount = chunkCount + 1
         bufferTimeout = GetTime() + 1.0
         
-        -- Safety: prevent runaway memory if protocol breaks
         if #messageBuffer > MAX_BUFFER_CHARS then
             Warn("Server payload too large, resetting buffer")
             messageBuffer = ""
@@ -407,20 +520,17 @@ function HSP.HandleServerPayload(msg)
             return
         end
         
-        -- Debug: only print every 5 chunks to reduce spam
         if debugMode and (chunkCount == 1 or chunkCount % 5 == 0) then
             Debug("Received chunk %d (buffer=%d chars)", chunkCount, #messageBuffer)
         end
         
     elseif msg:find("^PETS_END") then
-        -- Guard against double handling
         if listCompleted then
             Debug("Ignoring duplicate PETS_END")
             return
         end
         listCompleted = true
         
-        -- End of chunked messages
         Debug("Received PETS_END, parsing buffered data (%d chunks)", chunkCount)
         
         local data = messageBuffer
@@ -428,19 +538,17 @@ function HSP.HandleServerPayload(msg)
         local totalChunks = chunkCount
         chunkCount = 0
         
-        -- Parse the data
         local serverPets = HSP.ParseServerPetData(data)
         if serverPets and #serverPets > 0 then
             pets = serverPets
         end
         
-        -- Capture count before async call
         local petCount = #pets
         local chunkTotal = totalChunks
         
-        -- UI update one frame later (safer during login)
         After(0.0, function()
             SavePetCache()
+            scrollOffset = 0
             currentPage = 1
             if HSP.MainFrame and HSP.MainFrame:IsShown() then
                 HSP.UpdateUI()
@@ -454,19 +562,26 @@ function HSP.HandleServerPayload(msg)
         Warn("Server error: %s", errMsg)
         print("|cFFFF0000BMP Error:|r " .. errMsg)
         
+        -- Handle NO_PET error: clear stuck state and auto-refresh after delay
+        if errMsg == "NO_PET" or errMsg:find("NO_PET") then
+            -- Reset state to allow new summon attempts
+            After(1.5, function()
+                Info("Refreshing pet list after NO_PET error...")
+                HSP.RequestPetList()
+            end)
+        end
+        
     elseif msg:find("^OK|") then
         local okMsg = tostring(msg:sub(4) or "")
         Info("Server: %s", okMsg)
         print("|cFF00FF00BMP:|r " .. okMsg)
         
     elseif msg:find("^SUMMONED|") then
-        -- Pet was summoned successfully
         local petName = tostring(msg:sub(10) or "pet")
         print("|cFF00FF00BMP:|r " .. petName .. " summoned!")
         HSP.RequestPetList()
-        
+
     elseif msg:find("^DISMISSED|") then
-        -- Pet was dismissed successfully
         local petName = tostring(msg:sub(11) or "pet")
         print("|cFF00FF00BMP:|r " .. petName .. " dismissed!")
         HSP.RequestPetList()
@@ -483,9 +598,8 @@ function HSP.OnAddonMessage(prefix, message, channel, sender)
     local playerName = UnitName("player")
     local isLocalEcho = (sender == playerName)
     
-    -- Ignore local echo of outgoing commands
     if isLocalEcho then
-        if message == "LIST" or message:find("^SUMMON|") or message:find("^DISMISS|") then
+        if message == "LIST" or message:find("^SUMMON|") or message:find("^DISMISS") then
             Debug("Ignoring local echo: %s", message)
             return
         end
@@ -495,7 +609,6 @@ function HSP.OnAddonMessage(prefix, message, channel, sender)
         print("|cFF00CCFF[BMP RECV]|r sender=" .. tostring(sender) .. " msg=" .. tostring(message):sub(1, 60))
     end
     
-    -- Only accept known server payload types
     if message:find("^PETS|") or 
        message:find("^PETS_CHUNK|") or 
        message == "PETS_END" or
@@ -520,8 +633,8 @@ function HSP.AddPet(slot, name, level, family)
         name = name,
         level = level or 1,
         family = family or "Unknown",
-        icon = "Interface\\Icons\\INV_Misc_QuestionMark",
-        isExotic = false,
+        icon = GetFamilyIcon(family or "Unknown"),
+        isExotic = EXOTIC_FAMILIES[family] or false,
         isActive = false,
         isManual = true,
     }
@@ -568,31 +681,16 @@ function HSP.FindPetByNumber(petNumber)
     return nil
 end
 
--- Get total number of stable slots available
-local function GetExtendedNumStableSlots()
-    if HasCustomAPI() and HSP_GetNumStableSlots then
-        return HSP_GetNumStableSlots()
-    end
-    -- Try to get server-reported slots, or use configured max
-    local serverSlots = GetNumStableSlots() or 5
-    local configuredMax = BeastmasterPlusDB.maxStableSlots or 99
-    -- Return the higher of server-reported or configured (for custom servers)
-    return math.max(serverSlots, configuredMax)
-end
-
 -- ============================================================================
 -- PET DATA MANAGEMENT (with caching)
 -- ============================================================================
 
--- Removed isAtStableMaster - addon doesn't interact with stable flow
-
--- Save pet data to cache (SavedVariables)
--- Uses forward-declared local variable
 SavePetCache = function()
     BeastmasterPlusCharDB.petCache = {}
     for _, pet in ipairs(pets) do
         table.insert(BeastmasterPlusCharDB.petCache, {
             stableIndex = pet.stableIndex,
+            petNumber = pet.petNumber,
             name = pet.name,
             level = pet.level,
             family = pet.family,
@@ -605,8 +703,6 @@ SavePetCache = function()
     Debug("Saved %d pets to cache", #pets)
 end
 
--- Load pet data from cache
--- Uses forward-declared local variable
 LoadPetCache = function()
     if BeastmasterPlusCharDB.petCache and #BeastmasterPlusCharDB.petCache > 0 then
         pets = {}
@@ -620,19 +716,15 @@ LoadPetCache = function()
     return false
 end
 
--- Load pet data from cache and merge manual pets (no stable master scanning)
 local function RefreshPetData()
-    Debug("RefreshPetData: Loading from cache only (stable scanning disabled)")
+    Debug("RefreshPetData: Loading from cache only")
     
-    -- Load from cache if not already loaded
     if #pets == 0 then
         LoadPetCache()
     end
     
-    -- Merge in manually added pets
     if BeastmasterPlusCharDB.manualPets then
         for slot, manualPet in pairs(BeastmasterPlusCharDB.manualPets) do
-            -- Check if this slot already exists
             local exists = false
             for _, pet in ipairs(pets) do
                 if pet.stableIndex == slot then
@@ -660,35 +752,41 @@ local function FilterPets(petList)
     
     for _, pet in ipairs(petList) do
         local include = true
+        local petName = tostring(pet.name or "")
+        local petFamily = tostring(pet.family or "")
+        local petLevel = tonumber(pet.level) or 1
         
-        -- Search filter
         if searchText and searchText ~= "" then
             local search = searchText:lower()
-            if not pet.name:lower():find(search, 1, true) and
-               not pet.family:lower():find(search, 1, true) then
+            if not petName:lower():find(search, 1, true) and
+               not petFamily:lower():find(search, 1, true) then
                 include = false
             end
         end
         
-        -- Family filter
         if include and db.filterFamily and db.filterFamily ~= "" then
-            if pet.family ~= db.filterFamily then
+            if petFamily ~= db.filterFamily then
                 include = false
             end
         end
         
-        -- Exotic filter
         if include and db.filterExoticOnly then
             if not pet.isExotic then
                 include = false
             end
         end
         
-        -- Level filter
+        if include and db.filterFavoritesOnly then
+            local fav = HSP.GetFavorite(pet.stableIndex or pet.petNumber)
+            if not fav or not fav.isFavorite then
+                include = false
+            end
+        end
+        
         if include then
             local minLevel = db.filterMinLevel or 1
             local maxLevel = db.filterMaxLevel or 80
-            if pet.level < minLevel or pet.level > maxLevel then
+            if petLevel < minLevel or petLevel > maxLevel then
                 include = false
             end
         end
@@ -710,15 +808,21 @@ local function SortPets(petList)
         local valA, valB
         
         if sortBy == "name" then
-            valA, valB = a.name:lower(), b.name:lower()
+            valA, valB = tostring(a.name or ""):lower(), tostring(b.name or ""):lower()
         elseif sortBy == "level" then
-            valA, valB = a.level, b.level
+            valA, valB = tonumber(a.level) or 1, tonumber(b.level) or 1
         elseif sortBy == "family" then
-            valA, valB = a.family:lower(), b.family:lower()
+            valA, valB = tostring(a.family or ""):lower(), tostring(b.family or ""):lower()
         else
-            valA, valB = a.stableIndex, b.stableIndex
+            valA, valB = a.stableIndex or a.petNumber or 0, b.stableIndex or b.petNumber or 0
         end
         
+        if valA == valB then
+            local idxA = a.stableIndex or a.petNumber or 0
+            local idxB = b.stableIndex or b.petNumber or 0
+            return idxA < idxB
+        end
+
         if sortOrder == "desc" then
             return valA > valB
         else
@@ -737,36 +841,80 @@ local function GetFilteredSortedPets()
 end
 
 -- ============================================================================
--- PAGINATION
+-- PAGINATION (legacy UI compatibility)
 -- ============================================================================
 
 local function GetPagedPets()
     local allPets = GetFilteredSortedPets()
     local db = BeastmasterPlusCharDB
-    local perPage = db.itemsPerPage or 25
+    local perPage = db.itemsPerPage or defaults.itemsPerPage or 25
+    local totalPages = math.max(1, math.ceil(#allPets / perPage))
+    if currentPage > totalPages then
+        currentPage = totalPages
+    elseif currentPage < 1 then
+        currentPage = 1
+    end
+
     local startIndex = ((currentPage - 1) * perPage) + 1
     local endIndex = math.min(startIndex + perPage - 1, #allPets)
-    
+
     local pagedPets = {}
     for i = startIndex, endIndex do
         table.insert(pagedPets, allPets[i])
     end
-    
-    local totalPages = math.ceil(#allPets / perPage)
-    
+
     return pagedPets, currentPage, totalPages, #allPets
+end
+
+-- ============================================================================
+-- SCROLLING (replaces pagination)
+-- ============================================================================
+
+function HSP.GetVisiblePets(rowCount)
+    local allPets = GetFilteredSortedPets()
+    local startIndex = scrollOffset + 1
+    local endIndex = math.min(scrollOffset + rowCount, #allPets)
+    
+    local visiblePets = {}
+    for i = startIndex, endIndex do
+        table.insert(visiblePets, allPets[i])
+    end
+    
+    return visiblePets, #allPets, scrollOffset
+end
+
+function HSP.SetScrollOffset(offset, maxRows)
+    local allPets = GetFilteredSortedPets()
+    local maxOffset = math.max(0, #allPets - maxRows)
+    scrollOffset = math.max(0, math.min(offset, maxOffset))
+end
+
+function HSP.ScrollUp(amount)
+    scrollOffset = math.max(0, scrollOffset - (amount or 1))
+end
+
+function HSP.ScrollDown(amount, maxRows)
+    local allPets = GetFilteredSortedPets()
+    local maxOffset = math.max(0, #allPets - maxRows)
+    scrollOffset = math.min(maxOffset, scrollOffset + (amount or 1))
 end
 
 -- ============================================================================
 -- FAVORITES MANAGEMENT
 -- ============================================================================
 
-local function GetFavorite(stableIndex)
+function HSP.GetFavorite(stableIndex)
     local favorites = BeastmasterPlusDB.favorites or {}
+    if not stableIndex then
+        return { isFavorite = false, notes = "" }
+    end
     return favorites[stableIndex] or { isFavorite = false, notes = "" }
 end
 
-local function SetFavorite(stableIndex, isFavorite, notes)
+function HSP.SetFavorite(stableIndex, isFavorite, notes)
+    if not stableIndex then
+        return
+    end
     BeastmasterPlusDB.favorites = BeastmasterPlusDB.favorites or {}
     BeastmasterPlusDB.favorites[stableIndex] = {
         isFavorite = isFavorite or false,
@@ -774,9 +922,12 @@ local function SetFavorite(stableIndex, isFavorite, notes)
     }
 end
 
-local function ToggleFavorite(stableIndex)
-    local fav = GetFavorite(stableIndex)
-    SetFavorite(stableIndex, not fav.isFavorite, fav.notes)
+function HSP.ToggleFavorite(stableIndex)
+    if not stableIndex then
+        return false
+    end
+    local fav = HSP.GetFavorite(stableIndex)
+    HSP.SetFavorite(stableIndex, not fav.isFavorite, fav.notes)
     return not fav.isFavorite
 end
 
@@ -784,79 +935,41 @@ end
 -- PUBLIC API
 -- ============================================================================
 
--- Recent pets tracking (last 5 summoned)
 local recentPets = {}
 local MAX_RECENT = 5
 
 local function AddRecentPet(petData)
     if not petData then return end
-    -- Remove if already in list
+    local petNumber = petData.petNumber or petData.stableIndex
+    if not petNumber then
+        return
+    end
     for i = #recentPets, 1, -1 do
-        if recentPets[i].petNumber == petData.petNumber then
+        if recentPets[i].petNumber == petNumber then
             table.remove(recentPets, i)
         end
     end
-    -- Add to front
     table.insert(recentPets, 1, {
-        petNumber = petData.petNumber,
+        petNumber = petNumber,
         name = petData.name,
         level = petData.level,
         family = petData.family,
         icon = petData.icon,
     })
-    -- Trim to max
     while #recentPets > MAX_RECENT do
         table.remove(recentPets)
     end
 end
 
-HSP.GetPets = GetPagedPets
 HSP.RefreshPets = RefreshPetData
-HSP.GetAllPets = function() return pets end -- Returns all pets without pagination
+HSP.GetPets = GetPagedPets
+HSP.GetAllPets = function() return RefreshPetData() end
+HSP.GetTotalPetCount = function() return #pets end
 HSP.GetRecentPets = function() return recentPets end
 HSP.AddRecentPet = AddRecentPet
-HSP.GetFavorite = GetFavorite
-HSP.SetFavorite = SetFavorite
-HSP.ToggleFavorite = ToggleFavorite
-HSP.PET_FAMILIES = PET_FAMILIES
-HSP.EXOTIC_FAMILIES = EXOTIC_FAMILIES
-
--- Quick filter helpers
-HSP.SetQuickFilter = function(filterType)
-    if filterType == "exotic" then
-        BeastmasterPlusCharDB.filterExoticOnly = not BeastmasterPlusCharDB.filterExoticOnly
-    elseif filterType == "maxLevel" then
-        if BeastmasterPlusCharDB.filterMinLevel == 80 then
-            BeastmasterPlusCharDB.filterMinLevel = 1
-        else
-            BeastmasterPlusCharDB.filterMinLevel = 80
-        end
-    elseif filterType == "clear" then
-        BeastmasterPlusCharDB.filterFamily = nil
-        BeastmasterPlusCharDB.filterExoticOnly = false
-        BeastmasterPlusCharDB.filterMinLevel = 1
-        BeastmasterPlusCharDB.filterMaxLevel = 80
-    end
-    currentPage = 1
-end
-
-HSP.GetActiveFilters = function()
-    local filters = {}
-    local db = BeastmasterPlusCharDB
-    if db.filterFamily then table.insert(filters, db.filterFamily) end
-    if db.filterExoticOnly then table.insert(filters, "Exotic") end
-    if db.filterMinLevel and db.filterMinLevel > 1 then table.insert(filters, "Lv" .. db.filterMinLevel .. "+") end
-    if db.filterMaxLevel and db.filterMaxLevel < 80 then table.insert(filters, "Lv" .. db.filterMaxLevel .. "-") end
-    return filters
-end
-
-HSP.SetSearch = function(text)
-    searchText = text or ""
-    currentPage = 1
-end
 
 HSP.SetPage = function(page)
-    currentPage = math.max(1, page)
+    currentPage = math.max(1, tonumber(page) or 1)
 end
 
 HSP.NextPage = function()
@@ -872,9 +985,58 @@ HSP.PrevPage = function()
     end
 end
 
+HSP.SetItemsPerPage = function(count)
+    BeastmasterPlusCharDB.itemsPerPage = math.max(1, tonumber(count) or defaults.itemsPerPage or 25)
+    currentPage = 1
+end
+
+-- Quick filter helpers
+HSP.SetQuickFilter = function(filterType)
+    if filterType == "exotic" then
+        BeastmasterPlusCharDB.filterExoticOnly = not BeastmasterPlusCharDB.filterExoticOnly
+    elseif filterType == "favorites" then
+        BeastmasterPlusCharDB.filterFavoritesOnly = not BeastmasterPlusCharDB.filterFavoritesOnly
+    elseif filterType == "clear" then
+        BeastmasterPlusCharDB.filterFamily = nil
+        BeastmasterPlusCharDB.filterExoticOnly = false
+        BeastmasterPlusCharDB.filterFavoritesOnly = false
+        BeastmasterPlusCharDB.filterMinLevel = 1
+        BeastmasterPlusCharDB.filterMaxLevel = 80
+        searchText = ""
+    end
+    scrollOffset = 0
+    currentPage = 1
+end
+
+HSP.GetActiveFilters = function()
+    local filters = {}
+    local db = BeastmasterPlusCharDB
+    if db.filterFamily then table.insert(filters, db.filterFamily) end
+    if db.filterExoticOnly then table.insert(filters, "Exotic") end
+    if db.filterFavoritesOnly then table.insert(filters, "Favorites") end
+    if db.filterMinLevel and db.filterMinLevel > 1 then table.insert(filters, "Lv" .. db.filterMinLevel .. "+") end
+    if db.filterMaxLevel and db.filterMaxLevel < 80 then table.insert(filters, "Lv" .. db.filterMaxLevel .. "-") end
+    return filters
+end
+
+HSP.SetSearch = function(text)
+    searchText = text or ""
+    scrollOffset = 0
+    currentPage = 1
+end
+
 HSP.SetSort = function(sortBy, sortOrder)
     BeastmasterPlusCharDB.sortBy = sortBy
-    BeastmasterPlusCharDB.sortOrder = sortOrder
+    if sortOrder then
+        BeastmasterPlusCharDB.sortOrder = sortOrder
+    end
+    scrollOffset = 0
+    currentPage = 1
+end
+
+HSP.ToggleSortOrder = function()
+    local db = BeastmasterPlusCharDB
+    db.sortOrder = db.sortOrder == "asc" and "desc" or "asc"
 end
 
 HSP.SetFilter = function(filterType, value)
@@ -882,21 +1044,35 @@ HSP.SetFilter = function(filterType, value)
         BeastmasterPlusCharDB.filterFamily = value
     elseif filterType == "exotic" then
         BeastmasterPlusCharDB.filterExoticOnly = value
+    elseif filterType == "favorites" then
+        BeastmasterPlusCharDB.filterFavoritesOnly = value
     elseif filterType == "minLevel" then
         BeastmasterPlusCharDB.filterMinLevel = value
     elseif filterType == "maxLevel" then
         BeastmasterPlusCharDB.filterMaxLevel = value
     end
+    scrollOffset = 0
     currentPage = 1
 end
 
 HSP.ClearFilters = function()
     BeastmasterPlusCharDB.filterFamily = nil
     BeastmasterPlusCharDB.filterExoticOnly = false
+    BeastmasterPlusCharDB.filterFavoritesOnly = false
     BeastmasterPlusCharDB.filterMinLevel = 1
     BeastmasterPlusCharDB.filterMaxLevel = 80
     searchText = ""
+    scrollOffset = 0
     currentPage = 1
+end
+
+HSP.ToggleCompactMode = function()
+    BeastmasterPlusCharDB.compactMode = not BeastmasterPlusCharDB.compactMode
+    return BeastmasterPlusCharDB.compactMode
+end
+
+HSP.IsCompactMode = function()
+    return BeastmasterPlusCharDB.compactMode or false
 end
 
 -- ============================================================================
@@ -907,7 +1083,6 @@ SLASH_BEASTMASTERPLUS1 = "/bmp"
 SLASH_BEASTMASTERPLUS2 = "/beastmaster"
 
 SlashCmdList["BEASTMASTERPLUS"] = function(msg)
-    -- Hunter-only check
     local _, playerClass = UnitClass("player")
     if playerClass ~= "HUNTER" then
         print("|cFFFF6600Beastmaster Plus|r is only available for Hunters.")
@@ -934,12 +1109,6 @@ SlashCmdList["BEASTMASTERPLUS"] = function(msg)
     elseif msg == "count" then
         RefreshPetData()
         Info("You have %d stabled pets.", #pets)
-    elseif msg == "api" then
-        if HasCustomAPI() then
-            print("|cFF00FF00Beastmaster Plus:|r Custom stable API detected!")
-        else
-            Warn("Custom stable API NOT found. Using standard API (limited to 5 slots).")
-        end
     elseif msg == "debug" or msg == "debug on" then
         HSP.SetDebugMode(true)
     elseif msg == "debug off" then
@@ -951,28 +1120,7 @@ SlashCmdList["BEASTMASTERPLUS"] = function(msg)
         HSP.ShowLog(count or 20)
     elseif msg == "dump" then
         HSP.DumpPetData()
-    elseif msg:find("^slots ") then
-        local num = tonumber(msg:match("^slots (%d+)"))
-        if num and num >= 5 and num <= 99 then
-            BeastmasterPlusDB.maxStableSlots = num
-            Info("Max stable slots set to %d. Use /bmp refresh to rescan.", num)
-        else
-            Warn("Usage: /bmp slots <5-99>")
-        end
-    elseif msg:find("^summon ") then
-        local cmd = msg:match("^summon (.+)")
-        if cmd and cmd ~= "" then
-            BeastmasterPlusDB.summonCommand = cmd
-            Info("Summon command set to: %s", cmd)
-            Info("Use %%d as placeholder for slot number.")
-        else
-            Warn("Usage: /bmp summon <command with %%d for slot>")
-        end
-    elseif msg == "summon" then
-        Info("Current summon command: %s", BeastmasterPlusDB.summonCommand or "(not set)")
-        Info("To set: /bmp summon /.stablepet %%d")
     elseif msg:find("^add ") then
-        -- /bmp add <slot> <name> <level> <family>
         local slot, name, level, family = msg:match("^add (%d+) ([^%s]+) (%d+) (.+)")
         if slot and name then
             HSP.AddPet(tonumber(slot), name, tonumber(level) or 1, family or "Unknown")
@@ -1011,12 +1159,17 @@ SlashCmdList["BEASTMASTERPLUS"] = function(msg)
         HSP.ListManualPets()
     elseif msg == "clear" then
         HSP.ClearAndRefresh()
+    elseif msg == "compact" then
+        local compact = HSP.ToggleCompactMode()
+        Info("Compact mode: %s", compact and "ON" or "OFF")
+        if HSP.MainFrame and HSP.MainFrame:IsShown() then HSP.UpdateUI() end
     else
         print("|cFFFFD100Beastmaster Plus commands:|r")
         print("  /bmp - Open stable manager")
         print("  /bmp refresh - Request pet list from server")
         print("  /bmp clear - Clear cache and refresh from server")
         print("  /bmp count - Show pet count")
+        print("  /bmp compact - Toggle compact mode")
         print("  /bmp dismiss <petNumber> - Dismiss active pet (not permanent)")
         print("|cFF888888Debug:|r")
         print("  /bmp debug - Toggle debug mode")
@@ -1032,10 +1185,8 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
--- Only use CHAT_MSG_ADDON - whisper/system paths are unstable and cause crashes
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 
--- Register addon prefix for server communication (support both old and new API)
 if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
     C_ChatInfo.RegisterAddonMessagePrefix(ADDON_PREFIX)
 elseif RegisterAddonMessagePrefix then
@@ -1044,10 +1195,8 @@ end
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" and arg1 == addonName then
-        -- Check if player is a Hunter - addon only works for Hunters
         local _, playerClass = UnitClass("player")
         if playerClass ~= "HUNTER" then
-            -- Silently disable for non-hunters
             isLoaded = false
             return
         end
@@ -1064,7 +1213,6 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         print("|cFFFFD100Beastmaster Plus|r loaded. Type /bmp for commands.")
         
     elseif event == "PLAYER_LOGIN" then
-        -- Double-check hunter class (UnitClass may not be available at ADDON_LOADED)
         local _, playerClass = UnitClass("player")
         if playerClass ~= "HUNTER" then
             isLoaded = false
@@ -1075,16 +1223,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if #pets > 0 then
             Info("Loaded %d pets from cache.", #pets)
         end
-        -- Request moved to PLAYER_ENTERING_WORLD with delay
         
     elseif event == "PLAYER_ENTERING_WORLD" then
         if not isLoaded then return end
         
-        -- Don't spam refresh on zoning, only do it once per session
         if HSP._didInitialRefresh then return end
         HSP._didInitialRefresh = true
         
-        -- Delay request to avoid login crash from immediate server response
         After(3.0, function()
             if not UnitExists("player") then return end
             if not UnitName("player") then return end
@@ -1092,10 +1237,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         end)
         
     elseif event == "CHAT_MSG_ADDON" then
-        -- arg1=prefix, arg2=message, arg3=channel, arg4=sender
         HSP.OnAddonMessage(arg1, arg2, arg3, arg4)
     end
 end)
 
--- Make addon namespace global for debugging
 _G.BeastmasterPlus = HSP

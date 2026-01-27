@@ -23,10 +23,16 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
    # The AddonMessageRouter implementation is provided by this module:
    #   src/BmpAddonMessageRouter.h / src/BmpAddonMessageRouter.cpp
    # If a partial hook already exists, the script will add any missing pieces.
+   # Use --force to re-apply if core changed or patch defaults were updated:
+   #   modules/mod-beastmasterplus/patches/apply-core-addon-hook.sh --force
 
-3) Configure (optional):
+3) Configure (optional but recommended):
    cp modules/mod-beastmasterplus/conf/mod_beastmasterplus.conf.dist \
       env/dist/etc/mod_beastmasterplus.conf
+   # REQUIRED for extended storage: allow multiple unslotted hunter pets
+   # BeastMasterPlus.AllowMultipleUnslottedPets = 1
+   # If this config is not loaded by the server, the core patch now defaults
+   # AllowMultipleUnslottedPets to true to avoid deleting dismissed pets.
 
 4) Build:
    ./acore.sh compiler
@@ -40,6 +46,7 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 - Addon UI is required for interaction
 - AddonMessageRouter is owned by this module (core only forward-declares it)
 - SQL seed is for testing only; do not use on production data
+- If AllowMultipleUnslottedPets is 0, dismissed pets can be removed when taming new ones
 - Dismiss is available via the UI button or `/bmp dismiss <petNumber>` (not permanent)
 
 ## Client Addon Installation (required)

@@ -85,7 +85,7 @@ index 55ebf72af..e8650bf58 100644
 -            stmt->SetData(0, ownerLowGUID);
 -            stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));
 -            stmt->SetData(2, uint8(PET_SAVE_LAST_STABLE_SLOT));
-+            bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", false);
++            bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
 +            if (allowMultipleUnslotted)
 +            {
 +                stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT_EQ);
@@ -174,7 +174,7 @@ diff --git a/src/server/scripts/Spells/spell_hunter.cpp b/src/server/scripts/Spe
                      return SPELL_FAILED_ALREADY_HAVE_SUMMON;
  
 -                if (petStable->GetUnslottedHunterPet())
-+                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", false);
++                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
 +                if (!allowMultipleUnslotted && petStable->GetUnslottedHunterPet())
                  {
                      caster->SendTameFailure(PET_TAME_TOO_MANY);

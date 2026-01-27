@@ -7,6 +7,13 @@ CORE_FILE="src/server/game/Handlers/ChatHandler.cpp"
 PET_FILE="src/server/game/Entities/Pet/Pet.cpp"
 DB_FILE="src/server/database/Database/Implementation/CharacterDatabase.h"
 HUNTER_FILE="src/server/scripts/Spells/spell_hunter.cpp"
+FORCE=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --force|-f) FORCE=1 ;;
+  esac
+done
 
 if ! [ -f "$CORE_FILE" ]; then
   echo "ERROR: $CORE_FILE not found. Run from AzerothCore repo root."
@@ -21,11 +28,11 @@ TAME_PATCH_PRESENT=0
 
 grep -Eq "AddonMessageRouter::Handle" "$CORE_FILE" && HOOK_PRESENT=1
 grep -Eq "namespace[[:space:]]+AddonMessageRouter" "$CORE_FILE" && DECL_PRESENT=1
-grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$PET_FILE" && PET_PATCH_PRESENT=1
+grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", true" "$PET_FILE" && PET_PATCH_PRESENT=1
 grep -Eq "CHAR_UPD_CHAR_PET_NO_SLOT" "$DB_FILE" && DB_PATCH_PRESENT=1
-grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
+grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", true" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
 
-if [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ] && [ "$TAME_PATCH_PRESENT" -eq 1 ]; then
+if [ "$FORCE" -eq 0 ] && [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ] && [ "$TAME_PATCH_PRESENT" -eq 1 ]; then
   echo "BeastMasterPlus core patch already present. Skipping."
   exit 0
 fi

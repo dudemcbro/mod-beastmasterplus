@@ -152,6 +152,7 @@ diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/P
 --- a/src/server/game/Entities/Pet/Pet.h
 +++ b/src/server/game/Entities/Pet/Pet.h
 @@ -66,6 +66,7 @@ class Pet : public Guardian
+     bool LoadPetFromDB(Player* owner, uint32 petEntry, uint32 petnumber, bool current, uint32 healthPct = 0, bool fullMana = false);
      bool isBeingLoaded() const override { return m_loading; }
      void SavePetToDB(PetSaveMode mode);
 +    void SavePetStateWithoutSlot();
@@ -161,14 +162,14 @@ diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/P
 diff --git a/src/server/scripts/Spells/spell_hunter.cpp b/src/server/scripts/Spells/spell_hunter.cpp
 --- a/src/server/scripts/Spells/spell_hunter.cpp
 +++ b/src/server/scripts/Spells/spell_hunter.cpp
-@@ -20,6 +20,7 @@
+@@ -20,5 +20,6 @@
  #include "Cell.h"
  #include "CellImpl.h"
 +#include "Config.h"
  #include "CreatureScript.h"
  #include "GridNotifiers.h"
  #include "Pet.h"
-@@ -984,7 +985,8 @@ class spell_hun_tame_beast : public SpellScript
+@@ -984,9 +985,10 @@ class spell_hun_tame_beast : public SpellScript
              {
                  if (petStable->CurrentPet)
                      return SPELL_FAILED_ALREADY_HAVE_SUMMON;

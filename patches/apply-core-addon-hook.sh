@@ -55,8 +55,12 @@ fi
 # Apply remaining (non-ChatHandler) hunks if needed
 if [ "$PET_PATCH_PRESENT" -eq 0 ] || [ "$DB_PATCH_PRESENT" -eq 0 ] || [ "$TAME_PATCH_PRESENT" -eq 0 ]; then
   echo "Applying remaining BeastMasterPlus core hunks (excluding ChatHandler)..."
-  git apply --exclude=src/server/game/Handlers/ChatHandler.cpp "$PATCH"
-  echo "Remaining hunks applied."
+  if git apply --exclude=src/server/game/Handlers/ChatHandler.cpp "$PATCH"; then
+    echo "Remaining hunks applied."
+  else
+    echo "ERROR: Remaining hunks failed to apply."
+    exit 1
+  fi
 fi
 
 # Insert hook call if missing

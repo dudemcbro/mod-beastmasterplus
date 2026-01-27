@@ -6,6 +6,7 @@ PATCH="$PATCH_DIR/core-beastmasterplus.patch"
 CORE_FILE="src/server/game/Handlers/ChatHandler.cpp"
 PET_FILE="src/server/game/Entities/Pet/Pet.cpp"
 DB_FILE="src/server/database/Database/Implementation/CharacterDatabase.h"
+HUNTER_FILE="src/server/scripts/Spells/spell_hunter.cpp"
 
 if ! [ -f "$CORE_FILE" ]; then
   echo "ERROR: $CORE_FILE not found. Run from AzerothCore repo root."
@@ -16,13 +17,15 @@ HOOK_PRESENT=0
 DECL_PRESENT=0
 PET_PATCH_PRESENT=0
 DB_PATCH_PRESENT=0
+TAME_PATCH_PRESENT=0
 
 grep -Eq "AddonMessageRouter::Handle" "$CORE_FILE" && HOOK_PRESENT=1
 grep -Eq "namespace[[:space:]]+AddonMessageRouter" "$CORE_FILE" && DECL_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$PET_FILE" && PET_PATCH_PRESENT=1
 grep -Eq "CHAR_UPD_CHAR_PET_NO_SLOT" "$DB_FILE" && DB_PATCH_PRESENT=1
+grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
 
-if [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ]; then
+if [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ] && [ "$TAME_PATCH_PRESENT" -eq 1 ]; then
   echo "BeastMasterPlus core patch already present. Skipping."
   exit 0
 fi
@@ -43,7 +46,7 @@ if [ "$DECL_PRESENT" -eq 0 ]; then
 fi
 
 # Apply remaining (non-ChatHandler) hunks if needed
-if [ "$PET_PATCH_PRESENT" -eq 0 ] || [ "$DB_PATCH_PRESENT" -eq 0 ]; then
+if [ "$PET_PATCH_PRESENT" -eq 0 ] || [ "$DB_PATCH_PRESENT" -eq 0 ] || [ "$TAME_PATCH_PRESENT" -eq 0 ]; then
   echo "Applying remaining BeastMasterPlus core hunks (excluding ChatHandler)..."
   git apply --exclude=src/server/game/Handlers/ChatHandler.cpp "$PATCH"
   echo "Remaining hunks applied."

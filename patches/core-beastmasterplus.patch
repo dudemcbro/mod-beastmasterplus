@@ -158,3 +158,25 @@ diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/P
      void FillPetInfo(PetStable::PetInfo* petInfo) const;
      void Remove(PetSaveMode mode, bool returnreagent = false);
      static void DeleteFromDB(ObjectGuid::LowType guidlow);
+diff --git a/src/server/scripts/Spells/spell_hunter.cpp b/src/server/scripts/Spells/spell_hunter.cpp
+--- a/src/server/scripts/Spells/spell_hunter.cpp
++++ b/src/server/scripts/Spells/spell_hunter.cpp
+@@ -20,6 +20,7 @@
+ #include "Cell.h"
+ #include "CellImpl.h"
++#include "Config.h"
+ #include "CreatureScript.h"
+ #include "GridNotifiers.h"
+ #include "Pet.h"
+@@ -984,7 +985,8 @@ class spell_hun_tame_beast : public SpellScript
+             {
+                 if (petStable->CurrentPet)
+                     return SPELL_FAILED_ALREADY_HAVE_SUMMON;
+ 
+-                if (petStable->GetUnslottedHunterPet())
++                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", false);
++                if (!allowMultipleUnslotted && petStable->GetUnslottedHunterPet())
+                 {
+                     caster->SendTameFailure(PET_TAME_TOO_MANY);
+                     return SPELL_FAILED_DONT_REPORT;
+                 }

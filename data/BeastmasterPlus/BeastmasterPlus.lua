@@ -231,9 +231,15 @@ function HSP.SummonPet(petNumber, petName)
     print("|cFFFFD100BMP:|r Summoning " .. (petName or "pet") .. "...")
 end
 
--- Send dismiss request to server via addon message
--- WoW combines: prefix + "\t" + message -> server sees "BMP\tDISMISS" or "BMP\tDISMISS|<petNumber>"
+-- Dismiss active pet. Prefer built-in dismiss to match core behavior.
+-- Falls back to BMP protocol if PetDismiss is unavailable.
 function HSP.DismissPet(petNumber, petName)
+    if type(PetDismiss) == "function" and UnitExists("pet") then
+        PetDismiss()
+        print("|cFFFFD100BMP:|r Pet dismissed.")
+        return
+    end
+
     local msg = "DISMISS"
     if petNumber then
         msg = "DISMISS|" .. tostring(petNumber)

@@ -40,6 +40,7 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 - Addon UI is required for interaction
 - AddonMessageRouter is owned by this module (core only forward-declares it)
 - SQL seed is for testing only; do not use on production data
+- Dismiss is available via the UI button or `/bmp dismiss <petNumber>` (not permanent)
 
 ## Client Addon Installation (required)
 
@@ -62,6 +63,7 @@ This module requires the BeastMasterPlus addon on the client.
 - The server module will load without the addon, but no UI or interaction is possible
 - All user interaction is addon UI only
 - Communication uses CHAT_MSG_ADDON with prefix BMP
+- Dismiss is available via the UI button or `/bmp dismiss <petNumber>`
 
 ## Layout
 

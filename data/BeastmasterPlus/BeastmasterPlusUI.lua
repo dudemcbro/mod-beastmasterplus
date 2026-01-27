@@ -512,7 +512,16 @@ local function CreatePetRow(parent, index)
             HSP.SummonPet(pet.petNumber or pet.stableIndex, pet.name)
         end
     end)
-    
+
+    row.dismissBtn = CreateButton(row, "Dismiss", 70, 24, "Dismiss active pet")
+    row.dismissBtn:SetPoint("LEFT", 555, 0)
+    row.dismissBtn:SetScript("OnClick", function(self)
+        local pet = self:GetParent().petData
+        if pet then
+            HSP.DismissPet(pet.petNumber or pet.stableIndex, pet.name)
+        end
+    end)
+
     row.index = index
     return row
 end

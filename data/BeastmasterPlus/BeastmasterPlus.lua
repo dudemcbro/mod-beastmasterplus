@@ -203,6 +203,20 @@ function HSP.SummonPet(petNumber, petName)
     print("|cFFFFD100BMP:|r Summoning " .. (petName or "pet") .. "...")
 end
 
+-- Send dismiss request to server via addon message
+-- WoW combines: prefix + "\t" + message -> server sees "BMP\tDISMISS|<petNumber>"
+function HSP.DismissPet(petNumber, petName)
+    if not petNumber then
+        Warn("Cannot dismiss: missing pet ID")
+        return
+    end
+
+    local msg = "DISMISS|" .. tostring(petNumber)
+    Info("Sending dismiss request: prefix=BMP, message=%s", msg)
+    SendAddonMessage(ADDON_PREFIX, msg, "WHISPER", UnitName("player"))
+    print("|cFFFFD100BMP:|r Dismissing " .. (petName or "pet") .. "...")
+end
+
 -- Request pet list from server
 function HSP.RequestPetList()
     if not isLoaded then return end
@@ -451,6 +465,12 @@ function HSP.HandleServerPayload(msg)
         print("|cFF00FF00BMP:|r " .. petName .. " summoned!")
         HSP.RequestPetList()
         
+    elseif msg:find("^DISMISSED|") then
+        -- Pet was dismissed successfully
+        local petName = tostring(msg:sub(11) or "pet")
+        print("|cFF00FF00BMP:|r " .. petName .. " dismissed!")
+        HSP.RequestPetList()
+        
     else
         Debug("Unknown message type: %s", msg)
     end
@@ -465,7 +485,7 @@ function HSP.OnAddonMessage(prefix, message, channel, sender)
     
     -- Ignore local echo of outgoing commands
     if isLocalEcho then
-        if message == "LIST" or message:find("^SUMMON|") then
+        if message == "LIST" or message:find("^SUMMON|") or message:find("^DISMISS|") then
             Debug("Ignoring local echo: %s", message)
             return
         end
@@ -481,7 +501,8 @@ function HSP.OnAddonMessage(prefix, message, channel, sender)
        message == "PETS_END" or
        message:find("^OK|") or
        message:find("^ERROR|") or
-       message:find("^SUMMONED|") then
+       message:find("^SUMMONED|") or
+       message:find("^DISMISSED|") then
         Debug("Server payload: %s", message:sub(1, 40))
         HSP.HandleServerPayload(message)
     else
@@ -531,6 +552,20 @@ function HSP.ListManualPets()
     if count == 0 then
         print("  (none)")
     end
+end
+
+function HSP.FindPetByNumber(petNumber)
+    if not petNumber then
+        return nil
+    end
+
+    for _, pet in ipairs(pets) do
+        if pet.petNumber == petNumber or pet.stableIndex == petNumber then
+            return pet
+        end
+    end
+
+    return nil
 end
 
 -- Get total number of stable slots available
@@ -956,6 +991,22 @@ SlashCmdList["BEASTMASTERPLUS"] = function(msg)
         else
             Warn("Usage: /bmp remove <slot>")
         end
+    elseif msg:find("^dismiss") then
+        local slot = tonumber(msg:match("^dismiss (%d+)"))
+        if not slot then
+            for _, pet in ipairs(pets) do
+                if pet.isActive then
+                    slot = pet.petNumber or pet.stableIndex
+                    break
+                end
+            end
+        end
+        if slot then
+            local pet = HSP.FindPetByNumber(slot) or { petNumber = slot, name = "pet" }
+            HSP.DismissPet(pet.petNumber, pet.name)
+        else
+            Warn("Usage: /bmp dismiss <petNumber>")
+        end
     elseif msg == "list" then
         HSP.ListManualPets()
     elseif msg == "clear" then
@@ -966,6 +1017,7 @@ SlashCmdList["BEASTMASTERPLUS"] = function(msg)
         print("  /bmp refresh - Request pet list from server")
         print("  /bmp clear - Clear cache and refresh from server")
         print("  /bmp count - Show pet count")
+        print("  /bmp dismiss <petNumber> - Dismiss active pet (not permanent)")
         print("|cFF888888Debug:|r")
         print("  /bmp debug - Toggle debug mode")
         print("  /bmp dump - Dump pet data")

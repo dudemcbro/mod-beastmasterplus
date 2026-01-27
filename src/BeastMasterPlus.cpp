@@ -269,31 +269,51 @@ namespace
             std::vector<PetRow> rows;
             std::unordered_set<uint32> entries;
 
+            Pet* activePet = player->GetPet();
             ObjectGuid::LowType ownerLow = player->GetGUID().GetCounter();
-            QueryResult result = CharacterDatabase.Query(
-                "SELECT id, entry, level, name, slot FROM character_pet WHERE owner = {} ORDER BY id",
-                ownerLow);
+            LOG_INFO("module.bmp", "BMP LIST: player={} guidLow={}", player->GetName(), ownerLow);
+            LOG_INFO("module.bmp", "BMP LIST SQL: SELECT id, entry, level, name, slot FROM character_pet WHERE owner = {} ORDER BY id", ownerLow);
+
+            auto LoadRows = [&](uint32& outRowCount)
+            {
+                QueryResult result = CharacterDatabase.Query(
+                    "SELECT id, entry, level, name, slot FROM character_pet WHERE owner = {} ORDER BY id",
+                    ownerLow);
+                outRowCount = 0;
+                if (result)
+                {
+                    do
+                    {
+                        Field* f = result->Fetch();
+                        PetRow row;
+                        row.petNumber = f[0].Get<uint32>();
+                        row.entry = f[1].Get<uint32>();
+                        row.level = f[2].Get<uint16>();
+                        row.name = SanitizeName(f[3].Get<std::string>());
+                        row.slot = f[4].Get<uint32>();
+                        rows.push_back(row);
+                        if (row.entry)
+                            entries.insert(row.entry);
+                        ++outRowCount;
+                    } while (result->NextRow());
+                }
+            };
+
+            uint32 rowCount = 0;
+            LoadRows(rowCount);
+            if (rowCount == 0 && activePet && activePet->IsHunterPet())
+            {
+                LOG_INFO("module.bmp", "BMP LIST: no DB rows; attempting SavePetToDB for active pet");
+                activePet->SavePetToDB(PET_SAVE_AS_CURRENT);
+                rows.clear();
+                entries.clear();
+                LoadRows(rowCount);
+            }
+            LOG_INFO("module.bmp", "BMP LIST: rows={}", rowCount);
 
             ObjectGuid::LowType activePetGuid = 0;
-            if (Pet* activePet = player->GetPet())
+            if (activePet)
                 activePetGuid = activePet->GetCharmInfo() ? activePet->GetCharmInfo()->GetPetNumber() : 0;
-
-            if (result)
-            {
-                do
-                {
-                    Field* f = result->Fetch();
-                    PetRow row;
-                    row.petNumber = f[0].Get<uint32>();
-                    row.entry = f[1].Get<uint32>();
-                    row.level = f[2].Get<uint16>();
-                    row.name = SanitizeName(f[3].Get<std::string>());
-                    row.slot = f[4].Get<uint32>();
-                    rows.push_back(row);
-                    if (row.entry)
-                        entries.insert(row.entry);
-                } while (result->NextRow());
-            }
 
             std::unordered_map<uint32, FamilyInfo> familyByEntry;
             if (!entries.empty())
@@ -424,6 +444,47 @@ namespace
             return;
         }
 
+        if (payload == "DISMISS" || payload.rfind("DISMISS|", 0) == 0)
+        {
+            uint32 requestedPetNumber = 0;
+            if (payload.size() > 7)
+            {
+                std::string arg = payload.substr(8);
+                if (!IsNumber(arg))
+                {
+                    SendError(session, "BAD_DISMISS");
+                    return;
+                }
+                requestedPetNumber = static_cast<uint32>(std::strtoul(arg.c_str(), nullptr, 10));
+            }
+
+            Pet* activePet = player->GetPet();
+            if (!activePet || !activePet->IsHunterPet())
+            {
+                SendError(session, "NO_ACTIVE_PET");
+                return;
+            }
+
+            CharmInfo* charm = activePet->GetCharmInfo();
+            if (!charm)
+            {
+                SendError(session, "NO_ACTIVE_PET");
+                return;
+            }
+
+            if (requestedPetNumber && charm->GetPetNumber() != requestedPetNumber)
+            {
+                SendError(session, "NOT_ACTIVE");
+                return;
+            }
+
+            std::string petName = activePet->GetName();
+            player->RemovePet(activePet, PET_SAVE_NOT_IN_SLOT, false);
+            SendBmp(session, "DISMISSED|" + SanitizeName(petName));
+            SendOk(session, "DISMISSED|" + SanitizeName(petName));
+            return;
+        }
+
         SendError(session, "UNKNOWN_CMD");
     }
 }
@@ -446,7 +507,7 @@ namespace BmpRouter
 
         if (!hadPrefix)
         {
-            if (!(payload == "LIST" || payload.rfind("SUMMON|", 0) == 0 || payload.rfind("HELLO|", 0) == 0))
+            if (!(payload == "LIST" || payload.rfind("SUMMON|", 0) == 0 || payload == "DISMISS" || payload.rfind("DISMISS|", 0) == 0 || payload.rfind("HELLO|", 0) == 0))
                 return false;
         }
 

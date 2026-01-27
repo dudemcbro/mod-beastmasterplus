@@ -20,6 +20,17 @@ if ! [ -f "$CORE_FILE" ]; then
   exit 1
 fi
 
+# Normalize defaults if patch already present but default is false
+if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$PET_FILE"; then
+  echo "Updating AllowMultipleUnslottedPets default in Pet.cpp -> true"
+  perl -pi -e 's/BeastMasterPlus\\.AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$PET_FILE"
+fi
+
+if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$HUNTER_FILE"; then
+  echo "Updating AllowMultipleUnslottedPets default in spell_hunter.cpp -> true"
+  perl -pi -e 's/BeastMasterPlus\\.AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$HUNTER_FILE"
+fi
+
 HOOK_PRESENT=0
 DECL_PRESENT=0
 PET_PATCH_PRESENT=0
@@ -28,9 +39,9 @@ TAME_PATCH_PRESENT=0
 
 grep -Eq "AddonMessageRouter::Handle" "$CORE_FILE" && HOOK_PRESENT=1
 grep -Eq "namespace[[:space:]]+AddonMessageRouter" "$CORE_FILE" && DECL_PRESENT=1
-grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", true" "$PET_FILE" && PET_PATCH_PRESENT=1
+grep -Eq "SavePetStateWithoutSlot" "$PET_FILE" && PET_PATCH_PRESENT=1
 grep -Eq "CHAR_UPD_CHAR_PET_NO_SLOT" "$DB_FILE" && DB_PATCH_PRESENT=1
-grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", true" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
+grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
 
 if [ "$FORCE" -eq 0 ] && [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ] && [ "$TAME_PATCH_PRESENT" -eq 1 ]; then
   echo "BeastMasterPlus core patch already present. Skipping."

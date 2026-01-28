@@ -427,6 +427,57 @@ path.write_text("\n".join(text) + "\n")
 PY
 fi
 
+# Unit.cpp: allow multiple unslotted pets when config enabled
+run_py <<'PY'
+from pathlib import Path
+
+path = Path("src/server/game/Entities/Unit/Unit.cpp")
+if path.exists():
+    lines = path.read_text().splitlines()
+    changed = False
+
+    # ensure Config include
+    if '#include "Config.h"' not in lines:
+        for i, line in enumerate(lines):
+            if line.strip() == '#include "Common.h"':
+                lines.insert(i + 1, '#include "Config.h"')
+                changed = True
+                break
+
+    text = "\n".join(lines)
+    if "BeastMasterPlus.AllowMultipleUnslottedPets" not in text:
+        old = (
+            "    PetStable& petStable = player->GetOrInitPetStable();\n"
+            "    if (petStable.CurrentPet || petStable.GetUnslottedHunterPet())\n"
+            "        return false;\n"
+        )
+        new = (
+            "    PetStable& petStable = player->GetOrInitPetStable();\n"
+            "    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);\n"
+            "    if (!allowMultipleUnslotted)\n"
+            "    {\n"
+            "        if (petStable.CurrentPet || petStable.GetUnslottedHunterPet())\n"
+            "            return false;\n"
+            "    }\n"
+            "    else\n"
+            "    {\n"
+            "        if (petStable.CurrentPet && !player->GetPetGUID())\n"
+            "        {\n"
+            "            petStable.UnslottedPets.push_back(std::move(*petStable.CurrentPet));\n"
+            "            petStable.CurrentPet.reset();\n"
+            "        }\n"
+            "        if (player->GetPetGUID())\n"
+            "            return false;\n"
+            "    }\n"
+        )
+        if old in text:
+            text = text.replace(old, new)
+            changed = True
+
+    if changed:
+        path.write_text(text + "\n")
+PY
+
 # Add logging for dismiss + RemovePet + SavePetToDB early exits
 run_py <<'PY'
 from pathlib import Path

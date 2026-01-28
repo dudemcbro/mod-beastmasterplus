@@ -326,6 +326,120 @@ path.write_text("\n".join(text) + "\n")
 PY
 fi
 
+# Add logging for dismiss + RemovePet + SavePetToDB early exits
+python3 - <<'PY'
+from pathlib import Path
+
+# SpellEffects.cpp: log regular dismiss pet
+se = Path("src/server/game/Spells/SpellEffects.cpp")
+if se.exists():
+    lines = se.read_text().splitlines()
+    if "BMP DISMISS:" not in se.read_text():
+        start = None
+        for i, line in enumerate(lines):
+            if line.startswith("void Spell::EffectDismissPet"):
+                start = i
+                break
+        if start is not None:
+            for i in range(start, min(len(lines), start + 120)):
+                if "Pet* pet = unitTarget->ToPet();" in lines[i]:
+                    insert = [
+                        "    if (Player* owner = pet->GetOwner() ? pet->GetOwner()->ToPlayer() : nullptr)",
+                        "    {",
+                        "        uint32 petNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
+                        "        LOG_INFO(\"module.bmp\", \"BMP DISMISS: player={} guidLow={} petNumber={}\",",
+                        "            owner->GetName(), owner->GetGUID().GetCounter(), petNumber);",
+                        "    }",
+                    ]
+                    lines[i+1:i+1] = insert
+                    se.write_text("\n".join(lines) + "\n")
+                    break
+
+# Player.cpp: log RemovePet
+player_cpp = Path("src/server/game/Entities/Player/Player.cpp")
+if player_cpp.exists():
+    text = player_cpp.read_text()
+    if "BMP RemovePet" not in text:
+        needle = """        if (pet->m_removed)
+            return;
+    }
+
+    if (returnreagent"""
+        if needle in text:
+            insert = """        if (pet->IsHunterPet())
+        {
+            uint32 petNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
+            LOG_INFO(\"module.bmp\", \"BMP RemovePet: player={} guidLow={} petNumber={} mode={} returnreagent={}\",
+                GetName(), GetGUID().GetCounter(), petNumber, uint32(mode), returnreagent);
+        }
+    }
+
+    if (returnreagent"""
+            text = text.replace(needle, insert)
+            player_cpp.write_text(text)
+
+    text = player_cpp.read_text()
+    if "BMP RemovePet (no active)" not in text:
+        needle2 = """        if (mode == PET_SAVE_NOT_IN_SLOT && m_petStable && m_petStable->CurrentPet)
+        {
+            // Handle removing pet while it is in \"temporarily unsummoned\" state, for example on mount
+"""
+        if needle2 in text:
+            insert2 = """        if (mode == PET_SAVE_NOT_IN_SLOT && m_petStable && m_petStable->CurrentPet)
+        {
+            LOG_INFO(\"module.bmp\", \"BMP RemovePet (no active): player={} guidLow={} petNumber={} mode={}\",
+                GetName(), GetGUID().GetCounter(), m_petStable->CurrentPet->PetNumber, uint32(mode));
+            // Handle removing pet while it is in \"temporarily unsummoned\" state, for example on mount
+"""
+            text = text.replace(needle2, insert2)
+            player_cpp.write_text(text)
+
+# Pet.cpp: log SavePetToDB early exits + temp unsummoned
+pet_cpp = Path("src/server/game/Entities/Pet/Pet.cpp")
+if pet_cpp.exists():
+    text = pet_cpp.read_text()
+    if "BMP SavePetToDB skip" not in text:
+        needle = """    Player* owner = GetOwner()->ToPlayer();
+    if (!owner || m_loading || !GetEntry() || !isControlled() || m_removed || !m_charmInfo)
+        return;
+"""
+        if needle in text:
+            repl = """    Player* owner = GetOwner()->ToPlayer();
+    if (!owner || m_loading || !GetEntry() || !isControlled() || m_removed || !m_charmInfo)
+    {
+        if (owner && getPetType() == HUNTER_PET)
+            LOG_INFO(\"module.bmp\", \"BMP SavePetToDB skip: owner={} mode={} loading={} entry={} controlled={} removed={} charmInfo={}\",
+                owner->GetGUID().GetCounter(), uint32(mode), m_loading, GetEntry(), isControlled(), m_removed, m_charmInfo ? 1 : 0);
+        return;
+    }
+"""
+            text = text.replace(needle, repl)
+            pet_cpp.write_text(text)
+
+    text = pet_cpp.read_text()
+    if "BMP SavePetToDB temp unsummoned" not in text:
+        needle2 = """    if (mode == PET_SAVE_AS_CURRENT && owner->GetTemporaryUnsummonedPetNumber() &&
+            owner->GetTemporaryUnsummonedPetNumber() != m_charmInfo->GetPetNumber())
+    {
+        // pet will lost anyway at restore temporary unsummoned
+        if (getPetType() == HUNTER_PET)
+            return;
+"""
+        if needle2 in text:
+            repl2 = """    if (mode == PET_SAVE_AS_CURRENT && owner->GetTemporaryUnsummonedPetNumber() &&
+            owner->GetTemporaryUnsummonedPetNumber() != m_charmInfo->GetPetNumber())
+    {
+        // pet will lost anyway at restore temporary unsummoned
+        if (getPetType() == HUNTER_PET)
+        {
+            LOG_INFO(\"module.bmp\", \"BMP SavePetToDB temp unsummoned: owner={} tempPet={} currentPet={} mode={}\",
+                owner->GetGUID().GetCounter(), owner->GetTemporaryUnsummonedPetNumber(), m_charmInfo->GetPetNumber(), uint32(mode));
+            return;
+        }
+"""
+            text = text.replace(needle2, repl2)
+            pet_cpp.write_text(text)
+PY
 HOOK_PRESENT=0
 DECL_PRESENT=0
 PET_PATCH_PRESENT=0

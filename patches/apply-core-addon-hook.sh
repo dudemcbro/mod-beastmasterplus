@@ -12,19 +12,23 @@ SPELL_EFFECTS_FILE="src/server/game/Spells/SpellEffects.cpp"
 FORCE=0
 
 run_py() {
-  local tmp
+  local tmp pycache
   tmp="$(mktemp)"
+  pycache="$(mktemp -d)"
   cat > "$tmp"
-  if ! python3 -m py_compile "$tmp"; then
+  if ! PYTHONPYCACHEPREFIX="$pycache" python3 -m py_compile "$tmp"; then
     echo "ERROR: python syntax check failed in patch helper." >&2
     rm -f "$tmp"
+    rm -rf "$pycache"
     exit 1
   fi
-  if ! python3 "$tmp"; then
+  if ! PYTHONPYCACHEPREFIX="$pycache" python3 "$tmp"; then
     rm -f "$tmp"
+    rm -rf "$pycache"
     exit 1
   fi
   rm -f "$tmp"
+  rm -rf "$pycache"
 }
 
 for arg in "$@"; do
@@ -574,23 +578,23 @@ if pet_handler.exists():
         if m:
             indent = m.group('indent')
             new = (
-                f"{indent}if (pet->ToPet()->getPetType() == HUNTER_PET)\\n"
-                f"{indent}{{\\n"
-                f"{indent}    uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;\\n"
-                f"{indent}    bool allowMultiple = sConfigMgr->GetOption<bool>(\\"BeastMasterPlus.AllowMultipleUnslottedPets\\", false);\\n"
-                f"{indent}    if (allowMultiple)\\n"
-                f"{indent}    {{\\n"
-                f"{indent}        LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action)->DISMISS: player={} guidLow={} petNumber={}\\",\\n"
-                f"{indent}            GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);\\n"
-                f"{indent}        GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_NOT_IN_SLOT);\\n"
-                f"{indent}    }}\\n"
-                f"{indent}    else\\n"
-                f"{indent}    {{\\n"
-                f"{indent}        LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action): player={} guidLow={} petNumber={}\\",\\n"
-                f"{indent}            GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);\\n"
-                f"{indent}        GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);\\n"
-                f"{indent}    }}\\n"
-                f"{indent}}}\\n"
+                f'{indent}if (pet->ToPet()->getPetType() == HUNTER_PET)\\n'
+                f'{indent}{{\\n'
+                f'{indent}    uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;\\n'
+                f'{indent}    bool allowMultiple = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", false);\\n'
+                f'{indent}    if (allowMultiple)\\n'
+                f'{indent}    {{\\n'
+                f'{indent}        LOG_INFO("module.bmp", "BMP ABANDON (pet action)->DISMISS: player={{}} guidLow={{}} petNumber={{}}",\\n'
+                f'{indent}            GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);\\n'
+                f'{indent}        GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_NOT_IN_SLOT);\\n'
+                f'{indent}    }}\\n'
+                f'{indent}    else\\n'
+                f'{indent}    {{\\n'
+                f'{indent}        LOG_INFO("module.bmp", "BMP ABANDON (pet action): player={{}} guidLow={{}} petNumber={{}}",\\n'
+                f'{indent}            GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);\\n'
+                f'{indent}        GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);\\n'
+                f'{indent}    }}\\n'
+                f'{indent}}}\\n'
             )
             text = text[:m.start()] + new + text[m.end():]
             pet_handler.write_text(text)
@@ -600,7 +604,7 @@ if pet_handler.exists():
         old2 = """            _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
 """
         insert = """            uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
-            LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (opcode): player={} guidLow={} petNumber={}\\",
+            LOG_INFO("module.bmp", "BMP ABANDON (opcode): player={} guidLow={} petNumber={}",
                 _player->GetName(), _player->GetGUID().GetCounter(), petNumber);
             _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
 """

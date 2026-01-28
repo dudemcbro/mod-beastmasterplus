@@ -190,7 +190,7 @@ if hunter_cpp.exists():
                     "            }",
                 ]
                 lines[if_idx:end_i + 1] = new_block
-                hunter_cpp.write_text(\"\\n\".join(lines) + \"\\n\")
+                hunter_cpp.write_text("\n".join(lines) + "\n")
 PY
 
 # Normalize SpellEffects.cpp: remove mis-inserted block in EffectJump and ensure tame path normalization exists

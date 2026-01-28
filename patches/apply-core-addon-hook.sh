@@ -43,6 +43,105 @@ if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$SPELL_EFFECT
   perl -pi -e 's/BeastMasterPlus[.]AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$SPELL_EFFECTS_FILE"
 fi
 
+# Normalize Pet.cpp + CharacterDatabase for multi-unslotted slot preservation
+python3 - <<'PY'
+from pathlib import Path
+
+# CharacterDatabase.h: add new statement enum if missing
+db_h = Path("src/server/database/Database/Implementation/CharacterDatabase.h")
+if db_h.exists():
+    lines = db_h.read_text().splitlines()
+    if not any("CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" in l for l in lines):
+        for i, line in enumerate(lines):
+            if "CHAR_UPD_CHAR_PET_SLOT_BY_ID" in line:
+                lines.insert(i + 1, "    CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT,")
+                break
+        db_h.write_text("\\n".join(lines) + "\\n")
+
+# CharacterDatabase.cpp: add prepared statement if missing
+db_cpp = Path("src/server/database/Database/Implementation/CharacterDatabase.cpp")
+if db_cpp.exists():
+    lines = db_cpp.read_text().splitlines()
+    if not any("CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" in l for l in lines):
+        for i, line in enumerate(lines):
+            if "PrepareStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID" in line:
+                lines.insert(i + 1, "    PrepareStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT, \\\"UPDATE character_pet SET slot = ? WHERE owner = ? AND slot = ? AND id <> ?\\\", CONNECTION_ASYNC);")
+                break
+        db_cpp.write_text("\\n".join(lines) + "\\n")
+
+# Pet.cpp: ensure allow-multiple branch updates slot=100 instead of deleting slot=0
+pet_cpp = Path("src/server/game/Entities/Pet/Pet.cpp")
+if pet_cpp.exists():
+    lines = pet_cpp.read_text().splitlines()
+
+    # ensure Config include
+    if '#include "Config.h"' not in lines:
+        for i, line in enumerate(lines):
+            if line.strip() == '#include "Common.h"':
+                lines.insert(i + 1, '#include "Config.h"')
+                break
+
+    # find SavePetToDB allow-multiple block
+    block_start = None
+    for i, line in enumerate(lines):
+        if "prevent existence another hunter pet in PET_SAVE_AS_CURRENT" in line:
+            block_start = i
+            break
+    if block_start is not None:
+        if_idx = None
+        for i in range(block_start, len(lines)):
+            if "if (getPetType() == HUNTER_PET" in lines[i]:
+                if_idx = i
+                break
+        if if_idx is not None:
+            # find first '{' after if_idx
+            brace_i = None
+            for i in range(if_idx, len(lines)):
+                if lines[i].strip() == "{":
+                    brace_i = i
+                    break
+            if brace_i is not None:
+                depth = 0
+                end_i = None
+                for i in range(brace_i, len(lines)):
+                    if lines[i].strip() == "{":
+                        depth += 1
+                    if lines[i].strip() == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end_i = i
+                            break
+                if end_i is not None:
+                    new_block = [
+                        "        if (getPetType() == HUNTER_PET && (mode == PET_SAVE_AS_CURRENT || mode > PET_SAVE_LAST_STABLE_SLOT))",
+                        "        {",
+                        "            bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);",
+                        "            if (allowMultipleUnslotted)",
+                        "            {",
+                        "                if (mode == PET_SAVE_AS_CURRENT)",
+                        "                {",
+                        "                    stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT);",
+                        "                    stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));",
+                        "                    stmt->SetData(1, ownerLowGUID);",
+                        "                    stmt->SetData(2, uint8(PET_SAVE_AS_CURRENT));",
+                        "                    stmt->SetData(3, m_charmInfo->GetPetNumber());",
+                        "                    trans->Append(stmt);",
+                        "                }",
+                        "            }",
+                        "            else",
+                        "            {",
+                        "                stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT);",
+                        "                stmt->SetData(0, ownerLowGUID);",
+                        "                stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));",
+                        "                stmt->SetData(2, uint8(PET_SAVE_LAST_STABLE_SLOT));",
+                        "                trans->Append(stmt);",
+                        "            }",
+                        "        }",
+                    ]
+                    lines[if_idx:end_i + 1] = new_block
+                    pet_cpp.write_text("\\n".join(lines) + "\\n")
+PY
+
 # Normalize SpellEffects.cpp: remove mis-inserted block in EffectJump and ensure tame path normalization exists
 if [ -f "$SPELL_EFFECTS_FILE" ]; then
   python3 - <<'PY'

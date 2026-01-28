@@ -43,6 +43,128 @@ if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$SPELL_EFFECT
   perl -pi -e 's/BeastMasterPlus[.]AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$SPELL_EFFECTS_FILE"
 fi
 
+# Normalize SpellEffects.cpp: remove mis-inserted block in EffectJump and ensure tame path normalization exists
+if [ -f "$SPELL_EFFECTS_FILE" ]; then
+  python3 - <<'PY'
+from pathlib import Path
+
+path = Path("src/server/game/Spells/SpellEffects.cpp")
+text = path.read_text().splitlines()
+
+# Ensure Config include
+if '#include "Config.h"' not in text:
+    for i, line in enumerate(text):
+        if line.strip() == '#include "Common.h"':
+            text.insert(i + 1, '#include "Config.h"')
+            break
+
+def find_func(name):
+    for i, line in enumerate(text):
+        if line.startswith(f"void Spell::{name}"):
+            return i
+    return None
+
+def find_block(start):
+    # find first '{' after start, then match braces
+    brace = None
+    for i in range(start, len(text)):
+        if text[i].strip() == '{':
+            brace = i
+            break
+    if brace is None:
+        return None, None
+    depth = 0
+    for i in range(brace, len(text)):
+        if text[i].strip() == '{':
+            depth += 1
+        if text[i].strip() == '}':
+            depth -= 1
+            if depth == 0:
+                return brace, i
+    return None, None
+
+# Remove wrong block injected into EffectJump
+jump_start = find_func("EffectJump")
+if jump_start is not None:
+    jb, je = find_block(jump_start)
+    if jb is not None:
+        # find block inside function that contains AllowMultipleUnslottedPets
+        i = jb
+        while i <= je:
+            if "AllowMultipleUnslottedPets" in text[i]:
+                # remove enclosing block: search upward for '{' at same indent and forward to matching '}'
+                # find opening brace for this block
+                open_i = None
+                for j in range(i, jb, -1):
+                    if text[j].strip() == '{':
+                        open_i = j
+                        break
+                if open_i is not None:
+                    depth = 0
+                    close_i = None
+                    for k in range(open_i, je + 1):
+                        if text[k].strip() == '{':
+                            depth += 1
+                        if text[k].strip() == '}':
+                            depth -= 1
+                            if depth == 0:
+                                close_i = k
+                                break
+                    if close_i is not None:
+                        del text[open_i:close_i + 1]
+                break
+            i += 1
+
+# Ensure tame creature block normalization
+tame_start = find_func("EffectTameCreature")
+if tame_start is not None:
+    tb, te = find_block(tame_start)
+    if tb is not None:
+        # find the if (m_caster->IsPlayer()) block within tame
+        marker = "    if (m_caster->IsPlayer())"
+        idx = None
+        for i in range(tame_start, te + 1):
+            if text[i] == marker:
+                idx = i
+                break
+        if idx is not None and idx + 1 < len(text) and text[idx + 1].strip() == '{':
+            # find end of this if block
+            depth = 0
+            end = None
+            for i in range(idx + 1, te + 1):
+                if text[i].strip() == '{':
+                    depth += 1
+                if text[i].strip() == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            if end is not None:
+                block = "\n".join(text[idx:end + 1])
+                if "SavePetToDB(PET_SAVE_AS_CURRENT)" in block and "AllowMultipleUnslottedPets" not in block:
+                    new_block = [
+                        "    if (m_caster->IsPlayer())",
+                        "    {",
+                        "        bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);",
+                        "        if (allowMultipleUnslotted)",
+                        "        {",
+                        "            ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();",
+                        "            uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
+                        "            if (newPetNumber)",
+                        "                CharacterDatabase.Execute(",
+                        "                    \"UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}\",",
+                        "                    ownerLow, newPetNumber);",
+                        "        }",
+                        "        pet->SavePetToDB(PET_SAVE_AS_CURRENT);",
+                        "        m_caster->ToPlayer()->PetSpellInitialize();",
+                        "    }",
+                    ]
+                    text[idx:end + 1] = new_block
+
+path.write_text("\n".join(text) + "\n")
+PY
+fi
+
 HOOK_PRESENT=0
 DECL_PRESENT=0
 PET_PATCH_PRESENT=0
@@ -57,7 +179,10 @@ grep -Eq "SavePetStateWithoutSlot" "$PET_FILE" && PET_PATCH_PRESENT=1
 grep -Eq "CHAR_UPD_CHAR_PET_NO_SLOT" "$DB_FILE" && DB_PATCH_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$SPELL_FILE" && SPELL_PATCH_PRESENT=1
-grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$SPELL_EFFECTS_FILE" && SPELL_EFFECTS_PATCH_PRESENT=1
+if [ -f "$SPELL_EFFECTS_FILE" ]; then
+  # After normalization, treat SpellEffects as patched
+  SPELL_EFFECTS_PATCH_PRESENT=1
+fi
 
 if [ "$FORCE" -eq 0 ] && [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ] && [ "$TAME_PATCH_PRESENT" -eq 1 ] && [ "$SPELL_PATCH_PRESENT" -eq 1 ] && [ "$SPELL_EFFECTS_PATCH_PRESENT" -eq 1 ]; then
   echo "BeastMasterPlus core patch already present. Skipping."

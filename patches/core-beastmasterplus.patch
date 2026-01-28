@@ -244,3 +244,58 @@ index 7ebf33999..c08c7259e 100644
      }
  }
  
+--- a/src/server/game/Spells/Spell.cpp
++++ b/src/server/game/Spells/Spell.cpp
+@@ -22,6 +22,7 @@
+ #include "CharmInfo.h"
+ #include "CellImpl.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "ConditionMgr.h"
+ #include "DisableMgr.h"
+ #include "DynamicObject.h"
+@@ -3757,7 +3758,16 @@
+     {
+         if (m_caster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))
+             if (Pet* pet = m_caster->ToPlayer()->GetPet())
+-                m_caster->ToPlayer()->RemovePet(pet, PET_SAVE_AS_CURRENT);
++            {
++                PetSaveMode mode = PET_SAVE_AS_CURRENT;
++                if (pet->IsHunterPet())
++                {
++                    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++                    if (allowMultipleUnslotted)
++                        mode = PET_SAVE_NOT_IN_SLOT;
++                }
++                m_caster->ToPlayer()->RemovePet(pet, mode);
++            }
+ 
+         if (Unit* charm = m_caster->GetCharm())
+             charm->RemoveAurasByType(SPELL_AURA_MOD_CHARM, m_caster->GetGUID());
+--- a/src/server/game/Spells/SpellEffects.cpp
++++ b/src/server/game/Spells/SpellEffects.cpp
+@@ -22,6 +22,7 @@
+ #include "CellImpl.h"
+ #include "Chat.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "Creature.h"
+ #include "DynamicObject.h"
+ #include "Formulas.h"
+@@ -3136,6 +3137,16 @@
+ 
+     if (m_caster->IsPlayer())
+     {
++        bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++        if (allowMultipleUnslotted)
++        {
++            ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();
++            uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
++            if (newPetNumber)
++                CharacterDatabase.Execute(
++                    "UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}",
++                    ownerLow, newPetNumber);
++        }
+         pet->SavePetToDB(PET_SAVE_AS_CURRENT);
+         m_caster->ToPlayer()->PetSpellInitialize();
+     }

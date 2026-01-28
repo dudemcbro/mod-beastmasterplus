@@ -450,6 +450,43 @@ if pet_cpp.exists():
             text = text.replace(needle2, repl2)
             pet_cpp.write_text(text)
 PY
+
+# PetHandler.cpp: log explicit abandon paths (pet action + opcode)
+python3 - <<'PY'
+from pathlib import Path
+
+pet_handler = Path("src/server/game/Handlers/PetHandler.cpp")
+if pet_handler.exists():
+    text = pet_handler.read_text()
+    if "BMP ABANDON (pet action)" not in text:
+        old = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
+                                GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+"""
+        if old in text:
+            new = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
+                        {
+                                uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
+                                LOG_INFO(\"module.bmp\", \"BMP ABANDON (pet action): player={} guidLow={} petNumber={}\",
+                                    GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
+                                GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+                        }
+"""
+            text = text.replace(old, new)
+            pet_handler.write_text(text)
+
+    text = pet_handler.read_text()
+    if "BMP ABANDON (opcode)" not in text:
+        old2 = "            _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+"
+        insert = """            uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
+            LOG_INFO(\"module.bmp\", \"BMP ABANDON (opcode): player={} guidLow={} petNumber={}\",
+                _player->GetName(), _player->GetGUID().GetCounter(), petNumber);
+            _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+"""
+        if old2 in text:
+            text = text.replace(old2, insert)
+            pet_handler.write_text(text)
+PY
 HOOK_PRESENT=0
 DECL_PRESENT=0
 PET_PATCH_PRESENT=0

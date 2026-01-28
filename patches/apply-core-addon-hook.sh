@@ -11,6 +11,22 @@ SPELL_FILE="src/server/game/Spells/Spell.cpp"
 SPELL_EFFECTS_FILE="src/server/game/Spells/SpellEffects.cpp"
 FORCE=0
 
+run_py() {
+  local tmp
+  tmp="$(mktemp)"
+  cat > "$tmp"
+  if ! python3 -m py_compile "$tmp"; then
+    echo "ERROR: python syntax check failed in patch helper." >&2
+    rm -f "$tmp"
+    exit 1
+  fi
+  if ! python3 "$tmp"; then
+    rm -f "$tmp"
+    exit 1
+  fi
+  rm -f "$tmp"
+}
+
 for arg in "$@"; do
   case "$arg" in
     --force|-f) FORCE=1 ;;
@@ -44,7 +60,7 @@ if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$SPELL_EFFECT
 fi
 
 # Normalize Pet.cpp + CharacterDatabase for multi-unslotted slot preservation
-python3 - <<'PY'
+run_py <<'PY'
 from pathlib import Path
 
 # CharacterDatabase.h: add new statement enum if missing
@@ -133,7 +149,7 @@ if pet_cpp.exists():
 PY
 
 # Normalize spell_hunter.cpp tame check to allow multi-unslotted when no active pet
-python3 - <<'PY'
+run_py <<'PY'
 from pathlib import Path
 
 hunter_cpp = Path("src/server/scripts/Spells/spell_hunter.cpp")
@@ -182,6 +198,10 @@ if hunter_cpp.exists():
                 new_block = [
                     "            if (petStable)",
                     "            {",
+                    "                uint32 targetEntry = GetExplTargetUnit() ? GetExplTargetUnit()->GetEntry() : 0;",
+                    "                LOG_INFO(\"module.bmp\", \"BMP TAME CHECK: player={} guidLow={} targetEntry={} activePetGuid={} currentPet={} unslottedCount={}\",",
+                    "                    player->GetName(), player->GetGUID().GetCounter(), targetEntry, player->GetPetGUID().GetCounter(),",
+                    "                    petStable->CurrentPet ? 1 : 0, petStable->UnslottedPets.size());",
                     "                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);",
                     "                if (petStable->CurrentPet)",
                     "                {",
@@ -206,9 +226,55 @@ if hunter_cpp.exists():
                 hunter_cpp.write_text("\n".join(lines) + "\n")
 PY
 
+# Add tame start/fail logging in spell_hunter.cpp
+run_py <<'PY'
+from pathlib import Path
+
+hunter_cpp = Path("src/server/scripts/Spells/spell_hunter.cpp")
+if hunter_cpp.exists():
+    text = hunter_cpp.read_text()
+
+    if "BMP TAME CHECK START" not in text:
+        needle = "        Player* player = GetCaster()->ToPlayer();\n"
+        insert = (
+            "        Player* player = GetCaster()->ToPlayer();\n"
+            "        uint32 targetEntry = GetExplTargetUnit() ? GetExplTargetUnit()->GetEntry() : 0;\n"
+            "        LOG_INFO(\"module.bmp\", \"BMP TAME CHECK START: player={} guidLow={} targetEntry={} activePetGuid={}\",\n"
+            "            player->GetName(), player->GetGUID().GetCounter(), targetEntry, player->GetPetGUID().GetCounter());\n"
+        )
+        if needle in text:
+            text = text.replace(needle, insert)
+
+    if "BMP TAME FAIL:" not in text:
+        replacements = {
+            "            player->SendTameFailure(PET_TAME_TOO_HIGHLEVEL);":
+                "            LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: TOO_HIGHLEVEL player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
+                "            player->SendTameFailure(PET_TAME_TOO_HIGHLEVEL);",
+            "                player->SendTameFailure(PET_TAME_CANT_CONTROL_EXOTIC);":
+                "                LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: CANT_CONTROL_EXOTIC player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
+                "                player->SendTameFailure(PET_TAME_CANT_CONTROL_EXOTIC);",
+            "                player->SendTameFailure(PET_TAME_NOT_TAMEABLE);":
+                "                LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: NOT_TAMEABLE player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
+                "                player->SendTameFailure(PET_TAME_NOT_TAMEABLE);",
+            "                player->SendTameFailure(PET_TAME_ANOTHER_SUMMON_ACTIVE);":
+                "                LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: ANOTHER_SUMMON_ACTIVE player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
+                "                player->SendTameFailure(PET_TAME_ANOTHER_SUMMON_ACTIVE);",
+            "                player->SendTameFailure(PET_TAME_CREATURE_ALREADY_OWNED);":
+                "                LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: CREATURE_ALREADY_OWNED player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
+                "                player->SendTameFailure(PET_TAME_CREATURE_ALREADY_OWNED);",
+            "            player->SendTameFailure(PET_TAME_INVALID_CREATURE);":
+                "            LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: INVALID_CREATURE player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
+                "            player->SendTameFailure(PET_TAME_INVALID_CREATURE);",
+        }
+        for k, v in replacements.items():
+            text = text.replace(k, v)
+
+    hunter_cpp.write_text(text)
+PY
+
 # Normalize SpellEffects.cpp: remove mis-inserted block in EffectJump and ensure tame path normalization exists
 if [ -f "$SPELL_EFFECTS_FILE" ]; then
-  python3 - <<'PY'
+  run_py <<'PY'
 from pathlib import Path
 
 path = Path("src/server/game/Spells/SpellEffects.cpp")
@@ -245,6 +311,21 @@ def find_block(start):
             if depth == 0:
                 return brace, i
     return None, None
+
+# Insert tame fail logs for common early returns
+def logify_return(cond_line, reason):
+    for i in range(tame_start, te + 1):
+        if text[i].strip() == cond_line and i + 1 <= te and text[i + 1].strip() == "return;":
+            text[i:i + 2] = [
+                text[i],
+                "    {",
+                "        if (m_caster->IsPlayer())",
+                f"            LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: {reason} player={{}} guidLow={{}}\",",
+                "                m_caster->GetName(), m_caster->GetGUID().GetCounter());",
+                "        return;",
+                "    }",
+            ]
+            break
 
 # Remove wrong block injected into EffectJump
 jump_start = find_func("EffectJump")
@@ -283,6 +364,13 @@ tame_start = find_func("EffectTameCreature")
 if tame_start is not None:
     tb, te = find_block(tame_start)
     if tb is not None:
+        # add early-return logs
+        logify_return("if (m_caster->GetPetGUID())", "ALREADY_HAVE_PET")
+        logify_return("if (!unitTarget)", "NO_TARGET")
+        logify_return("if (!unitTarget->IsCreature())", "TARGET_NOT_CREATURE")
+        logify_return("if (creatureTarget->IsPet())", "TARGET_IS_PET")
+        logify_return("if (!m_caster->IsClass(CLASS_HUNTER, CLASS_CONTEXT_PET))", "NOT_HUNTER")
+
         # find the if (m_caster->IsPlayer()) block within tame
         marker = "    if (m_caster->IsPlayer())"
         idx = None
@@ -310,6 +398,9 @@ if tame_start is not None:
                         "    {",
                         "        ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();",
                         "        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
+                        "        LOG_INFO(\"module.bmp\", \"BMP TAME START: player={} guidLow={} targetEntry={} targetGuid={} activePetGuid={} tempUnsummoned={}\",",
+                        "            m_caster->GetName(), ownerLow, creatureTarget->GetEntry(), creatureTarget->GetGUID().GetCounter(),",
+                        "            m_caster->GetPetGUID().GetCounter(), m_caster->ToPlayer()->GetTemporaryUnsummonedPetNumber());",
                         "        LOG_INFO(\"module.bmp\", \"BMP TAME SAVE: player={} guidLow={} newPetNumber={}\",",
                         "            m_caster->GetName(), ownerLow, newPetNumber);",
                         "        if (newPetNumber)",
@@ -318,6 +409,12 @@ if tame_start is not None:
                         "                ownerLow, newPetNumber);",
                         "        pet->SavePetToDB(PET_SAVE_AS_CURRENT);",
                         "        m_caster->ToPlayer()->PetSpellInitialize();",
+                        "        if (QueryResult q = CharacterDatabase.Query(\"SELECT COUNT(*), SUM(slot = 0), SUM(slot = 100) FROM character_pet WHERE owner = {}\", ownerLow))",
+                        "        {",
+                        "            Field* f = q->Fetch();",
+                        "            LOG_INFO(\"module.bmp\", \"BMP TAME DB: owner={} total={} slot0={} slot100={}\",",
+                        "                ownerLow, f[0].Get<uint64>(), f[1].Get<uint64>(), f[2].Get<uint64>());",
+                        "        }",
                         "    }",
                     ]
                     text[idx:end + 1] = new_block
@@ -327,7 +424,7 @@ PY
 fi
 
 # Add logging for dismiss + RemovePet + SavePetToDB early exits
-python3 - <<'PY'
+run_py <<'PY'
 from pathlib import Path
 
 # SpellEffects.cpp: log regular dismiss pet
@@ -452,34 +549,59 @@ if pet_cpp.exists():
 PY
 
 # PetHandler.cpp: log explicit abandon paths (pet action + opcode)
-python3 - <<'PY'
+run_py <<'PY'
 from pathlib import Path
 
 pet_handler = Path("src/server/game/Handlers/PetHandler.cpp")
 if pet_handler.exists():
     text = pet_handler.read_text()
-    if "BMP ABANDON (pet action)" not in text:
-        old = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
-                                GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
-"""
-        if old in text:
-            new = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
+    if '#include "Config.h"' not in text:
+        text = text.replace('#include "Common.h"\\n', '#include "Common.h"\\n#include "Config.h"\\n')
+        pet_handler.write_text(text)
+
+    text = pet_handler.read_text()
+    old_with_log = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
                         {
                                 uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
-                                LOG_INFO(\"module.bmp\", \"BMP ABANDON (pet action): player={} guidLow={} petNumber={}\",
+                                LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action): player={} guidLow={} petNumber={}\\",
                                     GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
                                 GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
                         }
 """
-            text = text.replace(old, new)
-            pet_handler.write_text(text)
+    old_no_log = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
+                                GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+"""
+    new = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
+                        {
+                                uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
+                                bool allowMultiple = sConfigMgr->GetOption<bool>(\\"BeastMasterPlus.AllowMultipleUnslottedPets\\", false);
+                                if (allowMultiple)
+                                {
+                                    LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action)->DISMISS: player={} guidLow={} petNumber={}\\",
+                                        GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
+                                    GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_NOT_IN_SLOT);
+                                }
+                                else
+                                {
+                                    LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action): player={} guidLow={} petNumber={}\\",
+                                        GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
+                                    GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+                                }
+                        }
+"""
+    if old_with_log in text:
+        text = text.replace(old_with_log, new)
+        pet_handler.write_text(text)
+    elif old_no_log in text:
+        text = text.replace(old_no_log, new)
+        pet_handler.write_text(text)
 
     text = pet_handler.read_text()
     if "BMP ABANDON (opcode)" not in text:
         old2 = """            _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
 """
         insert = """            uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
-            LOG_INFO(\"module.bmp\", \"BMP ABANDON (opcode): player={} guidLow={} petNumber={}\",
+            LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (opcode): player={} guidLow={} petNumber={}\\",
                 _player->GetName(), _player->GetGUID().GetCounter(), petNumber);
             _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
 """

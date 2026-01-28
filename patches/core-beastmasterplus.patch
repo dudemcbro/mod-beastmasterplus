@@ -1,33 +1,8 @@
-diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
---- a/src/server/game/Handlers/ChatHandler.cpp
-+++ b/src/server/game/Handlers/ChatHandler.cpp
-@@ -41,6 +41,12 @@
- #include "WorldPacket.h"
- #include "WorldSession.h"
- 
-+// mod-beastmasterplus provides AddonMessageRouter in src/BmpAddonMessageRouter.*
-+namespace AddonMessageRouter
-+{
-+    bool Handle(WorldSession* session, std::string const& msg);
-+}
-+
- inline bool isNasty(uint8 c)
- {
-     if (c == '\t')
-@@ -287,6 +293,8 @@
-         {
-             if (AddonChannelCommandHandler(this).ParseCommands(msg.c_str()))
-                 return;
-+            if (AddonMessageRouter::Handle(this, msg))
-+                return;
-         }
-         else
-         {
 diff --git a/src/server/database/Database/Implementation/CharacterDatabase.cpp b/src/server/database/Database/Implementation/CharacterDatabase.cpp
-index 1b8650b49..37af239ad 100644
+index 25e9b635a..821eb1d61 100644
 --- a/src/server/database/Database/Implementation/CharacterDatabase.cpp
 +++ b/src/server/database/Database/Implementation/CharacterDatabase.cpp
-@@ -569,8 +569,13 @@ void CharacterDatabaseConnection::DoPrepareStatements()
+@@ -570,8 +570,13 @@ void CharacterDatabaseConnection::DoPrepareStatements()
      PrepareStatement(CHAR_DEL_CHAR_PET_BY_OWNER, "DELETE FROM character_pet WHERE owner = ?", CONNECTION_ASYNC);
      PrepareStatement(CHAR_UPD_CHAR_PET_NAME, "UPDATE character_pet SET name = ?, renamed = 1 WHERE owner = ? AND id = ?", CONNECTION_ASYNC);
      PrepareStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID, "UPDATE character_pet SET slot = ? WHERE owner = ? AND id = ?", CONNECTION_ASYNC);
@@ -42,10 +17,10 @@ index 1b8650b49..37af239ad 100644
  
      // PvPstats
 diff --git a/src/server/database/Database/Implementation/CharacterDatabase.h b/src/server/database/Database/Implementation/CharacterDatabase.h
-index 3ead3cf40..a064678cf 100644
+index 0329464f6..7de0e8c97 100644
 --- a/src/server/database/Database/Implementation/CharacterDatabase.h
 +++ b/src/server/database/Database/Implementation/CharacterDatabase.h
-@@ -483,8 +483,10 @@ enum CharacterDatabaseStatements : uint32
+@@ -484,8 +484,10 @@ enum CharacterDatabaseStatements : uint32
      CHAR_SEL_PET_DECLINED_NAME,
      CHAR_UPD_CHAR_PET_NAME,
      CHAR_UPD_CHAR_PET_SLOT_BY_ID,
@@ -57,7 +32,7 @@ index 3ead3cf40..a064678cf 100644
  
      CHAR_SEL_ITEMCONTAINER_ITEMS,
 diff --git a/src/server/game/Entities/Pet/Pet.cpp b/src/server/game/Entities/Pet/Pet.cpp
-index 55ebf72af..e8650bf58 100644
+index 55ebf72af..1c552498b 100644
 --- a/src/server/game/Entities/Pet/Pet.cpp
 +++ b/src/server/game/Entities/Pet/Pet.cpp
 @@ -20,6 +20,7 @@
@@ -149,9 +124,10 @@ index 55ebf72af..e8650bf58 100644
  {
      CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
 diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/Pet.h
+index 5639fff43..468dc44a3 100644
 --- a/src/server/game/Entities/Pet/Pet.h
 +++ b/src/server/game/Entities/Pet/Pet.h
-@@ -66,6 +66,7 @@ class Pet : public Guardian
+@@ -64,6 +64,7 @@ public:
      bool LoadPetFromDB(Player* owner, uint32 petEntry, uint32 petnumber, bool current, uint32 healthPct = 0, bool fullMana = false);
      bool isBeingLoaded() const override { return m_loading; }
      void SavePetToDB(PetSaveMode mode);
@@ -159,33 +135,57 @@ diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/P
      void FillPetInfo(PetStable::PetInfo* petInfo) const;
      void Remove(PetSaveMode mode, bool returnreagent = false);
      static void DeleteFromDB(ObjectGuid::LowType guidlow);
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+index 23417e1aa..93da664d3 100644
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -41,6 +41,11 @@
+ #include "WorldPacket.h"
+ #include "WorldSession.h"
+ 
++namespace AddonMessageRouter
++{
++    bool Handle(WorldSession* session, std::string const& msg);
++}
++
+ inline bool isNasty(uint8 c)
+ {
+     if (c == '\t')
+@@ -287,6 +292,8 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recvData)
+         {
+             if (AddonChannelCommandHandler(this).ParseCommands(msg.c_str()))
+                 return;
++            if (AddonMessageRouter::Handle(this, msg))
++                return;
+         }
+         else
+         {
 diff --git a/src/server/scripts/Spells/spell_hunter.cpp b/src/server/scripts/Spells/spell_hunter.cpp
+index 7ebf33999..c08c7259e 100644
 --- a/src/server/scripts/Spells/spell_hunter.cpp
 +++ b/src/server/scripts/Spells/spell_hunter.cpp
-@@ -20,5 +20,6 @@
+@@ -17,6 +17,7 @@
+ 
  #include "Cell.h"
  #include "CellImpl.h"
 +#include "Config.h"
  #include "CreatureScript.h"
  #include "GridNotifiers.h"
  #include "Pet.h"
-@@ -984,9 +985,10 @@ class spell_hun_tame_beast : public SpellScript
-             {
+@@ -984,7 +985,8 @@ class spell_hun_tame_beast : public SpellScript
                  if (petStable->CurrentPet)
                      return SPELL_FAILED_ALREADY_HAVE_SUMMON;
  
 -                if (petStable->GetUnslottedHunterPet())
 +                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
 +                if (!allowMultipleUnslotted && petStable->GetUnslottedHunterPet())
-                {
-                    caster->SendTameFailure(PET_TAME_TOO_MANY);
-                    return SPELL_FAILED_DONT_REPORT;
-                }
-diff --git a/src/server/game/Spells/Spell.cpp b/src/server/game/Spells/Spell.cpp
+                 {
+                     caster->SendTameFailure(PET_TAME_TOO_MANY);
+                     return SPELL_FAILED_DONT_REPORT;
+ 
 --- a/src/server/game/Spells/Spell.cpp
 +++ b/src/server/game/Spells/Spell.cpp
 @@ -22,6 +22,7 @@
- #include "Battleground.h"
  #include "CharmInfo.h"
  #include "CellImpl.h"
  #include "Common.h"
@@ -193,9 +193,7 @@ diff --git a/src/server/game/Spells/Spell.cpp b/src/server/game/Spells/Spell.cpp
  #include "ConditionMgr.h"
  #include "DisableMgr.h"
  #include "DynamicObject.h"
-@@ -3753,8 +3754,17 @@
-     // Xinef: implement attribute SPELL_ATTR1_DISMISS_PET_FIRST, on spell cast current pet is dismissed and charms are removed
-     if (m_spellInfo->HasAttribute(SPELL_ATTR1_DISMISS_PET_FIRST))
+@@ -3757,7 +3758,16 @@
      {
          if (m_caster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))
              if (Pet* pet = m_caster->ToPlayer()->GetPet())
@@ -210,3 +208,39 @@ diff --git a/src/server/game/Spells/Spell.cpp b/src/server/game/Spells/Spell.cpp
 +                }
 +                m_caster->ToPlayer()->RemovePet(pet, mode);
 +            }
+ 
+         if (Unit* charm = m_caster->GetCharm())
+             charm->RemoveAurasByType(SPELL_AURA_MOD_CHARM, m_caster->GetGUID());
+--- a/src/server/game/Spells/SpellEffects.cpp
++++ b/src/server/game/Spells/SpellEffects.cpp
+@@ -22,6 +22,7 @@
+ #include "CellImpl.h"
+ #include "Chat.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "Creature.h"
+ #include "DynamicObject.h"
+ #include "Formulas.h"
+@@ -1081,9 +1082,19 @@
+     CalculateJumpSpeeds(effIndex, m_caster->GetExactDist2d(unitTarget), speedXY, speedZ);
+     m_caster->GetMotionMaster()->MoveJump(*unitTarget, speedXY, speedZ);
+ 
+-    if (m_caster->IsPlayer())
+-    {
+-        sScriptMgr->AnticheatSetUnderACKmount(m_caster->ToPlayer());
++    {
++        bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++        if (allowMultipleUnslotted)
++        {
++            ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();
++            uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
++            if (newPetNumber)
++                CharacterDatabase.Execute(
++                    "UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}",
++                    ownerLow, newPetNumber);
++        }
++        pet->SavePetToDB(PET_SAVE_AS_CURRENT);
++        m_caster->ToPlayer()->PetSpellInitialize();
+     }
+ }
+ 

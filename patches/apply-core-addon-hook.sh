@@ -8,6 +8,7 @@ PET_FILE="src/server/game/Entities/Pet/Pet.cpp"
 DB_FILE="src/server/database/Database/Implementation/CharacterDatabase.h"
 HUNTER_FILE="src/server/scripts/Spells/spell_hunter.cpp"
 SPELL_FILE="src/server/game/Spells/Spell.cpp"
+SPELL_EFFECTS_FILE="src/server/game/Spells/SpellEffects.cpp"
 FORCE=0
 
 for arg in "$@"; do
@@ -37,12 +38,18 @@ if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$SPELL_FILE";
   perl -pi -e 's/BeastMasterPlus[.]AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$SPELL_FILE"
 fi
 
+if grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets\", false" "$SPELL_EFFECTS_FILE"; then
+  echo "Updating AllowMultipleUnslottedPets default in SpellEffects.cpp -> true"
+  perl -pi -e 's/BeastMasterPlus[.]AllowMultipleUnslottedPets\", false/BeastMasterPlus.AllowMultipleUnslottedPets\", true/' "$SPELL_EFFECTS_FILE"
+fi
+
 HOOK_PRESENT=0
 DECL_PRESENT=0
 PET_PATCH_PRESENT=0
 DB_PATCH_PRESENT=0
 TAME_PATCH_PRESENT=0
 SPELL_PATCH_PRESENT=0
+SPELL_EFFECTS_PATCH_PRESENT=0
 
 grep -Eq "AddonMessageRouter::Handle" "$CORE_FILE" && HOOK_PRESENT=1
 grep -Eq "namespace[[:space:]]+AddonMessageRouter" "$CORE_FILE" && DECL_PRESENT=1
@@ -50,8 +57,9 @@ grep -Eq "SavePetStateWithoutSlot" "$PET_FILE" && PET_PATCH_PRESENT=1
 grep -Eq "CHAR_UPD_CHAR_PET_NO_SLOT" "$DB_FILE" && DB_PATCH_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$SPELL_FILE" && SPELL_PATCH_PRESENT=1
+grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$SPELL_EFFECTS_FILE" && SPELL_EFFECTS_PATCH_PRESENT=1
 
-if [ "$FORCE" -eq 0 ] && [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ] && [ "$TAME_PATCH_PRESENT" -eq 1 ] && [ "$SPELL_PATCH_PRESENT" -eq 1 ]; then
+if [ "$FORCE" -eq 0 ] && [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ] && [ "$TAME_PATCH_PRESENT" -eq 1 ] && [ "$SPELL_PATCH_PRESENT" -eq 1 ] && [ "$SPELL_EFFECTS_PATCH_PRESENT" -eq 1 ]; then
   echo "BeastMasterPlus core patch already present. Skipping."
   exit 0
 fi
@@ -72,7 +80,7 @@ if [ "$DECL_PRESENT" -eq 0 ]; then
 fi
 
 # Apply remaining (non-ChatHandler) hunks if needed
-if [ "$PET_PATCH_PRESENT" -eq 0 ] || [ "$DB_PATCH_PRESENT" -eq 0 ] || [ "$TAME_PATCH_PRESENT" -eq 0 ] || [ "$SPELL_PATCH_PRESENT" -eq 0 ]; then
+if [ "$PET_PATCH_PRESENT" -eq 0 ] || [ "$DB_PATCH_PRESENT" -eq 0 ] || [ "$TAME_PATCH_PRESENT" -eq 0 ] || [ "$SPELL_PATCH_PRESENT" -eq 0 ] || [ "$SPELL_EFFECTS_PATCH_PRESENT" -eq 0 ]; then
   echo "Applying remaining BeastMasterPlus core hunks (excluding ChatHandler)..."
   APPLIED=0
 
@@ -108,6 +116,15 @@ if [ "$PET_PATCH_PRESENT" -eq 0 ] || [ "$DB_PATCH_PRESENT" -eq 0 ] || [ "$TAME_P
       APPLIED=1
     else
       echo "ERROR: Spell.cpp hunks failed to apply."
+      exit 1
+    fi
+  fi
+
+  if [ "$SPELL_EFFECTS_PATCH_PRESENT" -eq 0 ]; then
+    if git apply --include=src/server/game/Spells/SpellEffects.cpp "$PATCH"; then
+      APPLIED=1
+    else
+      echo "ERROR: SpellEffects.cpp hunks failed to apply."
       exit 1
     fi
   fi

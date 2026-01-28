@@ -398,6 +398,16 @@ if player_cpp.exists():
 pet_cpp = Path("src/server/game/Entities/Pet/Pet.cpp")
 if pet_cpp.exists():
     text = pet_cpp.read_text()
+    # replace older log signature (mode may be out of scope)
+    if "BMP SavePetToDB skip: owner={} mode={}" in text:
+        text = text.replace(
+            'LOG_INFO(\"module.bmp\", \"BMP SavePetToDB skip: owner={} mode={} loading={} entry={} controlled={} removed={} charmInfo={}\",\\n'
+            '                owner->GetGUID().GetCounter(), uint32(mode), m_loading, GetEntry(), isControlled(), m_removed, m_charmInfo ? 1 : 0);',
+            'LOG_INFO(\"module.bmp\", \"BMP SavePetToDB skip: owner={} loading={} entry={} controlled={} removed={} charmInfo={}\",\\n'
+            '                owner->GetGUID().GetCounter(), m_loading, GetEntry(), isControlled(), m_removed, m_charmInfo ? 1 : 0);'
+        )
+        pet_cpp.write_text(text)
+
     if "BMP SavePetToDB skip" not in text:
         needle = """    Player* owner = GetOwner()->ToPlayer();
     if (!owner || m_loading || !GetEntry() || !isControlled() || m_removed || !m_charmInfo)
@@ -408,8 +418,8 @@ if pet_cpp.exists():
     if (!owner || m_loading || !GetEntry() || !isControlled() || m_removed || !m_charmInfo)
     {
         if (owner && getPetType() == HUNTER_PET)
-            LOG_INFO(\"module.bmp\", \"BMP SavePetToDB skip: owner={} mode={} loading={} entry={} controlled={} removed={} charmInfo={}\",
-                owner->GetGUID().GetCounter(), uint32(mode), m_loading, GetEntry(), isControlled(), m_removed, m_charmInfo ? 1 : 0);
+            LOG_INFO(\"module.bmp\", \"BMP SavePetToDB skip: owner={} loading={} entry={} controlled={} removed={} charmInfo={}\",
+                owner->GetGUID().GetCounter(), m_loading, GetEntry(), isControlled(), m_removed, m_charmInfo ? 1 : 0);
         return;
     }
 """

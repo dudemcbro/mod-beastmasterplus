@@ -1202,6 +1202,8 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
+eventFrame:RegisterEvent("UNIT_PET")
+eventFrame:RegisterEvent("PET_UI_UPDATE")
 
 if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
     C_ChatInfo.RegisterAddonMessagePrefix(ADDON_PREFIX)
@@ -1254,6 +1256,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         
     elseif event == "CHAT_MSG_ADDON" then
         HSP.OnAddonMessage(arg1, arg2, arg3, arg4)
+    elseif event == "UNIT_PET" then
+        if not isLoaded then return end
+        if arg1 ~= "player" then return end
+        HSP.RequestPetList()
+    elseif event == "PET_UI_UPDATE" then
+        if not isLoaded then return end
+        HSP.RequestPetList()
     end
 end)
 

@@ -35,77 +35,18 @@ index 7ebf33999..c08c7259e 100644
  #include "CreatureScript.h"
  #include "GridNotifiers.h"
  #include "Pet.h"
-@@ -984,7 +985,8 @@ class spell_hun_tame_beast : public SpellScript
-                 if (petStable->CurrentPet)
-                     return SPELL_FAILED_ALREADY_HAVE_SUMMON;
- 
--                if (petStable->GetUnslottedHunterPet())
-+                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
-+                if (!allowMultipleUnslotted && petStable->GetUnslottedHunterPet())
-                 {
-                     caster->SendTameFailure(PET_TAME_TOO_MANY);
-                     return SPELL_FAILED_DONT_REPORT;
- 
---- a/src/server/game/Spells/Spell.cpp
-+++ b/src/server/game/Spells/Spell.cpp
-@@ -22,6 +22,7 @@
- #include "CharmInfo.h"
- #include "CellImpl.h"
- #include "Common.h"
-+#include "Config.h"
- #include "ConditionMgr.h"
- #include "DisableMgr.h"
- #include "DynamicObject.h"
-@@ -3757,7 +3758,16 @@
-     {
-         if (m_caster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))
-             if (Pet* pet = m_caster->ToPlayer()->GetPet())
--                m_caster->ToPlayer()->RemovePet(pet, PET_SAVE_AS_CURRENT);
-+            {
-+                PetSaveMode mode = PET_SAVE_AS_CURRENT;
-+                if (pet->IsHunterPet())
-+                {
-+                    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
-+                    if (allowMultipleUnslotted)
-+                        mode = PET_SAVE_NOT_IN_SLOT;
-+                }
-+                m_caster->ToPlayer()->RemovePet(pet, mode);
-+            }
- 
-         if (Unit* charm = m_caster->GetCharm())
-             charm->RemoveAurasByType(SPELL_AURA_MOD_CHARM, m_caster->GetGUID());
---- a/src/server/game/Spells/SpellEffects.cpp
-+++ b/src/server/game/Spells/SpellEffects.cpp
-@@ -22,6 +22,7 @@
- #include "CellImpl.h"
- #include "Chat.h"
- #include "Common.h"
-+#include "Config.h"
- #include "Creature.h"
- #include "DynamicObject.h"
- #include "Formulas.h"
-@@ -1081,9 +1082,19 @@
-     CalculateJumpSpeeds(effIndex, m_caster->GetExactDist2d(unitTarget), speedXY, speedZ);
-     m_caster->GetMotionMaster()->MoveJump(*unitTarget, speedXY, speedZ);
- 
--    if (m_caster->IsPlayer())
--    {
--        sScriptMgr->AnticheatSetUnderACKmount(m_caster->ToPlayer());
-+    {
-+        bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
-+        if (allowMultipleUnslotted)
-+        {
-+            ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();
-+            uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
-+            if (newPetNumber)
-+                CharacterDatabase.Execute(
-+                    "UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}",
-+                    ownerLow, newPetNumber);
-+        }
-+        pet->SavePetToDB(PET_SAVE_AS_CURRENT);
-+        m_caster->ToPlayer()->PetSpellInitialize();
-     }
- }
+@@ -984,7 +985,17 @@ class spell_hun_tame_beast : public SpellScript
+                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
+                if (petStable->CurrentPet)
+                {
+                    if (!allowMultipleUnslotted || player->GetPetGUID())
+                        return SPELL_FAILED_ALREADY_HAVE_SUMMON;
+                }
+
+                if (!allowMultipleUnslotted && petStable->GetUnslottedHunterPet())
+                {
+                    caster->SendTameFailure(PET_TAME_TOO_MANY);
+                    return SPELL_FAILED_DONT_REPORT;
  
 --- a/src/server/game/Spells/Spell.cpp
 +++ b/src/server/game/Spells/Spell.cpp
@@ -145,23 +86,19 @@ index 7ebf33999..c08c7259e 100644
  #include "Creature.h"
  #include "DynamicObject.h"
  #include "Formulas.h"
-@@ -3136,6 +3137,16 @@
- 
-     if (m_caster->IsPlayer())
-     {
-+        bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
-+        if (allowMultipleUnslotted)
-+        {
-+            ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();
-+            uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
-+            if (newPetNumber)
-+                CharacterDatabase.Execute(
-+                    "UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}",
-+                    ownerLow, newPetNumber);
-+        }
-         pet->SavePetToDB(PET_SAVE_AS_CURRENT);
-         m_caster->ToPlayer()->PetSpellInitialize();
-     }
+@@ -3136,6 +3137,11 @@
+
+    if (m_caster->IsPlayer())
+    {
++        ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();
++        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
++        if (newPetNumber)
++            CharacterDatabase.Execute(
++                "UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}",
++                ownerLow, newPetNumber);
+        pet->SavePetToDB(PET_SAVE_AS_CURRENT);
+        m_caster->ToPlayer()->PetSpellInitialize();
+    }
 --- a/src/server/database/Database/Implementation/CharacterDatabase.cpp
 +++ b/src/server/database/Database/Implementation/CharacterDatabase.cpp
 @@ -570,6 +570,7 @@
@@ -192,37 +129,20 @@ index 7ebf33999..c08c7259e 100644
  #include "DatabaseEnv.h"
  #include "GameTime.h"
  #include "Group.h"
-@@ -551,11 +552,27 @@
-         // prevent existence another hunter pet in PET_SAVE_AS_CURRENT and PET_SAVE_NOT_IN_SLOT
-         if (getPetType() == HUNTER_PET && (mode == PET_SAVE_AS_CURRENT || mode > PET_SAVE_LAST_STABLE_SLOT))
-         {
--            stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT);
--            stmt->SetData(0, ownerLowGUID);
--            stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));
--            stmt->SetData(2, uint8(PET_SAVE_LAST_STABLE_SLOT));
--            trans->Append(stmt);
-+            bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
-+            if (allowMultipleUnslotted)
-+            {
-+                if (mode == PET_SAVE_AS_CURRENT)
-+                {
-+                    stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT);
-+                    stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));
-+                    stmt->SetData(1, ownerLowGUID);
-+                    stmt->SetData(2, uint8(PET_SAVE_AS_CURRENT));
-+                    stmt->SetData(3, m_charmInfo->GetPetNumber());
-+                    trans->Append(stmt);
-+                }
-+            }
-+            else
-+            {
-+                stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT);
-+                stmt->SetData(0, ownerLowGUID);
-+                stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));
-+                stmt->SetData(2, uint8(PET_SAVE_LAST_STABLE_SLOT));
-+                trans->Append(stmt);
-+            }
-         }
+@@ -551,11 +552,17 @@
+        // prevent existence another hunter pet in PET_SAVE_AS_CURRENT and PET_SAVE_NOT_IN_SLOT
+        if (getPetType() == HUNTER_PET && (mode == PET_SAVE_AS_CURRENT || mode > PET_SAVE_LAST_STABLE_SLOT))
+        {
+            if (mode == PET_SAVE_AS_CURRENT)
+            {
+                stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT);
+                stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));
+                stmt->SetData(1, ownerLowGUID);
+                stmt->SetData(2, uint8(PET_SAVE_AS_CURRENT));
+                stmt->SetData(3, m_charmInfo->GetPetNumber());
+                trans->Append(stmt);
+            }
+        }
  
          // save pet
 --- a/src/server/game/Entities/Pet/Pet.h

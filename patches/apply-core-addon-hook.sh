@@ -115,31 +115,82 @@ if pet_cpp.exists():
                     new_block = [
                         "        if (getPetType() == HUNTER_PET && (mode == PET_SAVE_AS_CURRENT || mode > PET_SAVE_LAST_STABLE_SLOT))",
                         "        {",
-                        "            bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);",
-                        "            if (allowMultipleUnslotted)",
+                        "            if (mode == PET_SAVE_AS_CURRENT)",
                         "            {",
-                        "                if (mode == PET_SAVE_AS_CURRENT)",
-                        "                {",
-                        "                    stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT);",
-                        "                    stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));",
-                        "                    stmt->SetData(1, ownerLowGUID);",
-                        "                    stmt->SetData(2, uint8(PET_SAVE_AS_CURRENT));",
-                        "                    stmt->SetData(3, m_charmInfo->GetPetNumber());",
-                        "                    trans->Append(stmt);",
-                        "                }",
-                        "            }",
-                        "            else",
-                        "            {",
-                        "                stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT);",
-                        "                stmt->SetData(0, ownerLowGUID);",
-                        "                stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));",
-                        "                stmt->SetData(2, uint8(PET_SAVE_LAST_STABLE_SLOT));",
+                        "                stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT);",
+                        "                stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));",
+                        "                stmt->SetData(1, ownerLowGUID);",
+                        "                stmt->SetData(2, uint8(PET_SAVE_AS_CURRENT));",
+                        "                stmt->SetData(3, m_charmInfo->GetPetNumber());",
                         "                trans->Append(stmt);",
                         "            }",
                         "        }",
                     ]
                     lines[if_idx:end_i + 1] = new_block
                     pet_cpp.write_text("\n".join(lines) + "\n")
+PY
+
+# Normalize spell_hunter.cpp tame check to allow multi-unslotted when no active pet
+python3 - <<'PY'
+from pathlib import Path
+
+hunter_cpp = Path("src/server/scripts/Spells/spell_hunter.cpp")
+if hunter_cpp.exists():
+    lines = hunter_cpp.read_text().splitlines()
+
+    # ensure Config include
+    if '#include "Config.h"' not in lines:
+        for i, line in enumerate(lines):
+            if line.strip() == '#include "CellImpl.h"':
+                lines.insert(i + 1, '#include "Config.h"')
+                break
+
+    # find the tame beast check block
+    block_start = None
+    for i, line in enumerate(lines):
+        if "PetStable const* petStable = player->GetPetStable();" in line:
+            block_start = i
+            break
+
+    if block_start is not None:
+        # find "if (petStable)" block
+        if_idx = None
+        for i in range(block_start, len(lines)):
+            if lines[i].strip() == "if (petStable)":
+                if_idx = i
+                break
+        if if_idx is not None and if_idx + 1 < len(lines) and lines[if_idx + 1].strip() == "{":
+            # find end of this if block
+            depth = 0
+            end_i = None
+            for i in range(if_idx + 1, len(lines)):
+                if lines[i].strip() == "{":
+                    depth += 1
+                if lines[i].strip() == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end_i = i
+                        break
+            if end_i is not None:
+                new_block = [
+                    "            if (petStable)",
+                    "            {",
+                    "                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);",
+                    "                if (petStable->CurrentPet)",
+                    "                {",
+                    "                    if (!allowMultipleUnslotted || player->GetPetGUID())",
+                    "                        return SPELL_FAILED_ALREADY_HAVE_SUMMON;",
+                    "                }",
+                    "",
+                    "                if (!allowMultipleUnslotted && petStable->GetUnslottedHunterPet())",
+                    "                {",
+                    "                    caster->SendTameFailure(PET_TAME_TOO_MANY);",
+                    "                    return SPELL_FAILED_DONT_REPORT;",
+                    "                }",
+                    "            }",
+                ]
+                lines[if_idx:end_i + 1] = new_block
+                hunter_cpp.write_text(\"\\n\".join(lines) + \"\\n\")
 PY
 
 # Normalize SpellEffects.cpp: remove mis-inserted block in EffectJump and ensure tame path normalization exists
@@ -240,20 +291,16 @@ if tame_start is not None:
                         break
             if end is not None:
                 block = "\n".join(text[idx:end + 1])
-                if "SavePetToDB(PET_SAVE_AS_CURRENT)" in block and "AllowMultipleUnslottedPets" not in block:
+                if "SavePetToDB(PET_SAVE_AS_CURRENT)" in block:
                     new_block = [
                         "    if (m_caster->IsPlayer())",
                         "    {",
-                        "        bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);",
-                        "        if (allowMultipleUnslotted)",
-                        "        {",
-                        "            ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();",
-                        "            uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
-                        "            if (newPetNumber)",
-                        "                CharacterDatabase.Execute(",
-                        "                    \"UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}\",",
-                        "                    ownerLow, newPetNumber);",
-                        "        }",
+                        "        ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();",
+                        "        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
+                        "        if (newPetNumber)",
+                        "            CharacterDatabase.Execute(",
+                        "                \"UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}\",",
+                        "                ownerLow, newPetNumber);",
                         "        pet->SavePetToDB(PET_SAVE_AS_CURRENT);",
                         "        m_caster->ToPlayer()->PetSpellInitialize();",
                         "    }",

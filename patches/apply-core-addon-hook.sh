@@ -117,6 +117,8 @@ if pet_cpp.exists():
                         "        {",
                         "            if (mode == PET_SAVE_AS_CURRENT)",
                         "            {",
+                        "                LOG_INFO(\"module.bmp\", \"BMP SAVE: owner={} petNumber={} mode={} move other slot=0 -> NOT_IN_SLOT\",",
+                        "                    ownerLowGUID, m_charmInfo->GetPetNumber(), uint32(mode));",
                         "                stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT);",
                         "                stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));",
                         "                stmt->SetData(1, ownerLowGUID);",
@@ -143,6 +145,11 @@ if hunter_cpp.exists():
         for i, line in enumerate(lines):
             if line.strip() == '#include "CellImpl.h"':
                 lines.insert(i + 1, '#include "Config.h"')
+                break
+    if '#include "Log.h"' not in lines:
+        for i, line in enumerate(lines):
+            if line.strip() == '#include "Config.h"':
+                lines.insert(i + 1, '#include "Log.h"')
                 break
 
     # find the tame beast check block
@@ -179,11 +186,17 @@ if hunter_cpp.exists():
                     "                if (petStable->CurrentPet)",
                     "                {",
                     "                    if (!allowMultipleUnslotted || player->GetPetGUID())",
+                    "                    {",
+                    "                        LOG_INFO(\"module.bmp\", \"BMP TAME BLOCKED: player={} guidLow={} allowMultiple={} currentPet=1 activePetGuid={}\",",
+                    "                            player->GetName(), player->GetGUID().GetCounter(), allowMultipleUnslotted, player->GetPetGUID().GetCounter());",
                     "                        return SPELL_FAILED_ALREADY_HAVE_SUMMON;",
+                    "                    }",
                     "                }",
                     "",
                     "                if (!allowMultipleUnslotted && petStable->GetUnslottedHunterPet())",
                     "                {",
+                    "                    LOG_INFO(\"module.bmp\", \"BMP TAME BLOCKED: player={} guidLow={} allowMultiple={} unslottedCount={}\",",
+                    "                        player->GetName(), player->GetGUID().GetCounter(), allowMultipleUnslotted, petStable->UnslottedPets.size());",
                     "                    caster->SendTameFailure(PET_TAME_TOO_MANY);",
                     "                    return SPELL_FAILED_DONT_REPORT;",
                     "                }",
@@ -297,6 +310,8 @@ if tame_start is not None:
                         "    {",
                         "        ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();",
                         "        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
+                        "        LOG_INFO(\"module.bmp\", \"BMP TAME SAVE: player={} guidLow={} newPetNumber={}\",",
+                        "            m_caster->GetName(), ownerLow, newPetNumber);",
                         "        if (newPetNumber)",
                         "            CharacterDatabase.Execute(",
                         "                \"UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}\",",

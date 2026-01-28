@@ -476,8 +476,8 @@ if pet_handler.exists():
 
     text = pet_handler.read_text()
     if "BMP ABANDON (opcode)" not in text:
-        old2 = "            _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
-"
+        old2 = """            _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+"""
         insert = """            uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
             LOG_INFO(\"module.bmp\", \"BMP ABANDON (opcode): player={} guidLow={} petNumber={}\",
                 _player->GetName(), _player->GetGUID().GetCounter(), petNumber);

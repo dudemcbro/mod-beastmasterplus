@@ -56,7 +56,7 @@ if db_h.exists():
             if "CHAR_UPD_CHAR_PET_SLOT_BY_ID" in line:
                 lines.insert(i + 1, "    CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT,")
                 break
-        db_h.write_text("\\n".join(lines) + "\\n")
+        db_h.write_text("\n".join(lines) + "\n")
 
 # CharacterDatabase.cpp: add prepared statement if missing
 db_cpp = Path("src/server/database/Database/Implementation/CharacterDatabase.cpp")
@@ -65,9 +65,9 @@ if db_cpp.exists():
     if not any("CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" in l for l in lines):
         for i, line in enumerate(lines):
             if "PrepareStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID" in line:
-                lines.insert(i + 1, "    PrepareStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT, \\\"UPDATE character_pet SET slot = ? WHERE owner = ? AND slot = ? AND id <> ?\\\", CONNECTION_ASYNC);")
+                lines.insert(i + 1, "    PrepareStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT, \"UPDATE character_pet SET slot = ? WHERE owner = ? AND slot = ? AND id <> ?\", CONNECTION_ASYNC);")
                 break
-        db_cpp.write_text("\\n".join(lines) + "\\n")
+        db_cpp.write_text("\n".join(lines) + "\n")
 
 # Pet.cpp: ensure allow-multiple branch updates slot=100 instead of deleting slot=0
 pet_cpp = Path("src/server/game/Entities/Pet/Pet.cpp")
@@ -139,7 +139,7 @@ if pet_cpp.exists():
                         "        }",
                     ]
                     lines[if_idx:end_i + 1] = new_block
-                    pet_cpp.write_text("\\n".join(lines) + "\\n")
+                    pet_cpp.write_text("\n".join(lines) + "\n")
 PY
 
 # Normalize SpellEffects.cpp: remove mis-inserted block in EffectJump and ensure tame path normalization exists

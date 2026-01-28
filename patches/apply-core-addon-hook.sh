@@ -551,50 +551,49 @@ PY
 # PetHandler.cpp: log explicit abandon paths (pet action + opcode)
 run_py <<'PY'
 from pathlib import Path
+import re
 
 pet_handler = Path("src/server/game/Handlers/PetHandler.cpp")
 if pet_handler.exists():
     text = pet_handler.read_text()
     if '#include "Config.h"' not in text:
-        text = text.replace('#include "Common.h"\\n', '#include "Common.h"\\n#include "Config.h"\\n')
+        # Insert Config include after Common include (handle any line endings)
+        text, n = re.subn(r'(#include "Common\\.h"[^\\n]*\\n)', r'\\1#include "Config.h"\\n', text, count=1)
+        if n == 0:
+            text, _ = re.subn(r'(#include "[^"]+"[^\\n]*\\n)', r'\\1#include "Config.h"\\n', text, count=1)
         pet_handler.write_text(text)
 
     text = pet_handler.read_text()
-    old_with_log = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
-                        {
-                                uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
-                                LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action): player={} guidLow={} petNumber={}\\",
-                                    GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
-                                GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
-                        }
-"""
-    old_no_log = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
-                                GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
-"""
-    new = """                        if (pet->ToPet()->getPetType() == HUNTER_PET)
-                        {
-                                uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
-                                bool allowMultiple = sConfigMgr->GetOption<bool>(\\"BeastMasterPlus.AllowMultipleUnslottedPets\\", false);
-                                if (allowMultiple)
-                                {
-                                    LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action)->DISMISS: player={} guidLow={} petNumber={}\\",
-                                        GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
-                                    GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_NOT_IN_SLOT);
-                                }
-                                else
-                                {
-                                    LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action): player={} guidLow={} petNumber={}\\",
-                                        GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
-                                    GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
-                                }
-                        }
-"""
-    if old_with_log in text:
-        text = text.replace(old_with_log, new)
-        pet_handler.write_text(text)
-    elif old_no_log in text:
-        text = text.replace(old_no_log, new)
-        pet_handler.write_text(text)
+    if "BMP ABANDON (pet action)->DISMISS" not in text:
+        pattern = re.compile(
+            r'(?P<indent>^[ \\t]*)if \\(pet->ToPet\\(\\)->getPetType\\(\\) == HUNTER_PET\\)\\s*\\{'
+            r'[^}]*?GetPlayer\\(\\)->RemovePet\\(pet->ToPet\\(\\), PET_SAVE_AS_DELETED\\);\\s*\\}',
+            re.M | re.S
+        )
+        m = pattern.search(text)
+        if m:
+            indent = m.group('indent')
+            new = (
+                f"{indent}if (pet->ToPet()->getPetType() == HUNTER_PET)\\n"
+                f"{indent}{{\\n"
+                f"{indent}    uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;\\n"
+                f"{indent}    bool allowMultiple = sConfigMgr->GetOption<bool>(\\"BeastMasterPlus.AllowMultipleUnslottedPets\\", false);\\n"
+                f"{indent}    if (allowMultiple)\\n"
+                f"{indent}    {{\\n"
+                f"{indent}        LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action)->DISMISS: player={} guidLow={} petNumber={}\\",\\n"
+                f"{indent}            GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);\\n"
+                f"{indent}        GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_NOT_IN_SLOT);\\n"
+                f"{indent}    }}\\n"
+                f"{indent}    else\\n"
+                f"{indent}    {{\\n"
+                f"{indent}        LOG_INFO(\\"module.bmp\\", \\"BMP ABANDON (pet action): player={} guidLow={} petNumber={}\\",\\n"
+                f"{indent}            GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);\\n"
+                f"{indent}        GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);\\n"
+                f"{indent}    }}\\n"
+                f"{indent}}}\\n"
+            )
+            text = text[:m.start()] + new + text[m.end():]
+            pet_handler.write_text(text)
 
     text = pet_handler.read_text()
     if "BMP ABANDON (opcode)" not in text:

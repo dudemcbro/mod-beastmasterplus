@@ -681,6 +681,27 @@ if pet_handler.exists():
             text = text.replace(old2, insert)
             pet_handler.write_text(text)
 PY
+
+# Downgrade BMP logging to DEBUG to reduce noise
+run_py <<'PY'
+from pathlib import Path
+
+paths = [
+    Path("src/server/scripts/Spells/spell_hunter.cpp"),
+    Path("src/server/game/Entities/Player/Player.cpp"),
+    Path("src/server/game/Entities/Pet/Pet.cpp"),
+    Path("src/server/game/Spells/SpellEffects.cpp"),
+    Path("src/server/game/Handlers/PetHandler.cpp"),
+]
+
+for path in paths:
+    if not path.exists():
+        continue
+    text = path.read_text()
+    new_text = text.replace('LOG_INFO("module.bmp", "BMP', 'LOG_DEBUG("module.bmp", "BMP')
+    if new_text != text:
+        path.write_text(new_text)
+PY
 HOOK_PRESENT=0
 DECL_PRESENT=0
 PET_PATCH_PRESENT=0

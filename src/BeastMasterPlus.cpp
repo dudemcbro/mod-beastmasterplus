@@ -278,8 +278,8 @@ namespace
 
             Pet* activePet = player->GetPet();
             ObjectGuid::LowType ownerLow = player->GetGUID().GetCounter();
-            LOG_INFO("module.bmp", "BMP LIST: player={} guidLow={}", player->GetName(), ownerLow);
-            LOG_INFO("module.bmp", "BMP LIST SQL: SELECT id, entry, level, name, slot FROM character_pet WHERE owner = {} ORDER BY id", ownerLow);
+            LOG_DEBUG("module.bmp", "BMP LIST: player={} guidLow={}", player->GetName(), ownerLow);
+            LOG_DEBUG("module.bmp", "BMP LIST SQL: SELECT id, entry, level, name, slot FROM character_pet WHERE owner = {} ORDER BY id", ownerLow);
 
             auto LoadRows = [&](uint32& outRowCount)
             {
@@ -310,7 +310,7 @@ namespace
             LoadRows(rowCount);
             if (rowCount == 0 && activePet && activePet->IsHunterPet())
             {
-                LOG_INFO("module.bmp", "BMP LIST: no DB rows; attempting SavePetToDB for active pet");
+                LOG_DEBUG("module.bmp", "BMP LIST: no DB rows; attempting SavePetToDB for active pet");
                 activePet->SavePetToDB(PET_SAVE_AS_CURRENT);
                 rows.clear();
                 entries.clear();
@@ -325,7 +325,7 @@ namespace
                 else if (row.slot == PET_SAVE_NOT_IN_SLOT)
                     ++slot100Count;
             }
-            LOG_INFO("module.bmp", "BMP LIST: rows={} slot0={} slot100={}", rowCount, slot0Count, slot100Count);
+            LOG_DEBUG("module.bmp", "BMP LIST: rows={} slot0={} slot100={}", rowCount, slot0Count, slot100Count);
 
             ObjectGuid::LowType activePetGuid = 0;
             if (activePet)
@@ -550,7 +550,7 @@ namespace
             }
 
             std::string petName = activePet->GetName();
-            LOG_INFO("module.bmp", "BMP DISMISS REQ: player={} guidLow={} activePet={} requestedPet={}",
+            LOG_DEBUG("module.bmp", "BMP DISMISS REQ: player={} guidLow={} activePet={} requestedPet={}",
                 player->GetName(), player->GetGUID().GetCounter(), charm->GetPetNumber(), requestedPetNumber);
             player->RemovePet(activePet, PET_SAVE_NOT_IN_SLOT, false);
             if (QueryResult q = CharacterDatabase.Query(
@@ -558,7 +558,7 @@ namespace
                 player->GetGUID().GetCounter()))
             {
                 Field* f = q->Fetch();
-                LOG_INFO("module.bmp", "BMP DISMISS DB: owner={} total={} slot0={} slot100={}",
+                LOG_DEBUG("module.bmp", "BMP DISMISS DB: owner={} total={} slot0={} slot100={}",
                     player->GetGUID().GetCounter(), f[0].Get<uint64>(), f[1].Get<uint64>(), f[2].Get<uint64>());
             }
             SendBmp(session, "DISMISSED|" + SanitizeName(petName));

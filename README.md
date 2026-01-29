@@ -28,7 +28,7 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 
 3) Configure (optional but recommended):
    cp modules/mod-beastmasterplus/conf/mod_beastmasterplus.conf.dist \
-      env/dist/etc/mod_beastmasterplus.conf
+      env/dist/etc/modules/mod_beastmasterplus.conf
    # REQUIRED for extended storage: allow multiple unslotted hunter pets
    # BeastMasterPlus.AllowMultipleUnslottedPets = 1
    # If this config is not loaded by the server, the core patch now defaults
@@ -47,6 +47,8 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 - AddonMessageRouter is owned by this module (core only forward-declares it)
 - SQL seed is for testing only; do not use on production data
 - If AllowMultipleUnslottedPets is 0, dismissed pets can be removed when taming new ones
+- If AllowMultipleUnslottedPets is 1, the hunter pet action "Abandon" is treated as a dismiss
+  (PET_SAVE_NOT_IN_SLOT / slot 100) to prevent losing pets while taming
 - Dismiss is available via the UI button or `/bmp dismiss <petNumber>` (not permanent)
 
 ## Client Addon Installation (required)

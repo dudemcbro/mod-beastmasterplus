@@ -2,7 +2,7 @@
 set -u
 
 PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
-PATCH="$PATCH_DIR/core-beastmasterplus.patch"
+PATCH="$PATCH_DIR/core-beastmasterplus.normalized.patch"
 CORE_FILE="src/server/game/Handlers/ChatHandler.cpp"
 PET_FILE="src/server/game/Entities/Pet/Pet.cpp"
 DB_FILE="src/server/database/Database/Implementation/CharacterDatabase.h"
@@ -10,6 +10,7 @@ HUNTER_FILE="src/server/scripts/Spells/spell_hunter.cpp"
 SPELL_FILE="src/server/game/Spells/Spell.cpp"
 SPELL_EFFECTS_FILE="src/server/game/Spells/SpellEffects.cpp"
 FORCE=0
+PATCH_APPLIED=0
 
 run_py() {
   local tmp pycache
@@ -40,6 +41,20 @@ done
 if ! [ -f "$CORE_FILE" ]; then
   echo "ERROR: $CORE_FILE not found. Run from AzerothCore repo root."
   exit 1
+fi
+
+# Try to apply normalized patch before scripted edits
+if git apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+  PATCH_APPLIED=1
+elif git apply --check "$PATCH" >/dev/null 2>&1; then
+  echo "Applying BeastMasterPlus core patch..."
+  if git apply "$PATCH"; then
+    PATCH_APPLIED=1
+  else
+    echo "Patch failed to apply cleanly; continuing with scripted edits."
+  fi
+else
+  echo "Patch does not apply cleanly; continuing with scripted edits."
 fi
 
 # Normalize defaults if patch already present but default is false
@@ -152,6 +167,21 @@ if pet_cpp.exists():
                     pet_cpp.write_text("\n".join(lines) + "\n")
 PY
 
+# Pet.h: ensure SavePetStateWithoutSlot declaration exists
+run_py <<'PY'
+from pathlib import Path
+
+pet_h = Path("src/server/game/Entities/Pet/Pet.h")
+if pet_h.exists():
+    lines = pet_h.read_text().splitlines()
+    if not any("SavePetStateWithoutSlot" in l for l in lines):
+        for i, line in enumerate(lines):
+            if "void SavePetToDB(PetSaveMode mode);" in line:
+                lines.insert(i + 1, "    void SavePetStateWithoutSlot();")
+                break
+        pet_h.write_text("\n".join(lines) + "\n")
+PY
+
 # Normalize spell_hunter.cpp tame check to allow multi-unslotted when no active pet
 run_py <<'PY'
 from pathlib import Path
@@ -228,6 +258,48 @@ if hunter_cpp.exists():
                 ]
                 lines[if_idx:end_i + 1] = new_block
                 hunter_cpp.write_text("\n".join(lines) + "\n")
+PY
+
+# Spell.cpp: allow multiple unslotted when dismissing pet
+run_py <<'PY'
+from pathlib import Path
+
+path = Path("src/server/game/Spells/Spell.cpp")
+if path.exists():
+    lines = path.read_text().splitlines()
+
+    # ensure Config include
+    if '#include "Config.h"' not in lines:
+        for i, line in enumerate(lines):
+            if line.strip() == '#include "Common.h"':
+                lines.insert(i + 1, '#include "Config.h"')
+                break
+
+    text = "\n".join(lines)
+    if "BeastMasterPlus.AllowMultipleUnslottedPets" not in text:
+        old = (
+            "        if (m_caster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))\n"
+            "            if (Pet* pet = m_caster->ToPlayer()->GetPet())\n"
+            "                m_caster->ToPlayer()->RemovePet(pet, PET_SAVE_AS_CURRENT);\n"
+        )
+        new = (
+            "        if (m_caster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))\n"
+            "            if (Pet* pet = m_caster->ToPlayer()->GetPet())\n"
+            "            {\n"
+            "                PetSaveMode mode = PET_SAVE_AS_CURRENT;\n"
+            "                if (pet->IsHunterPet())\n"
+            "                {\n"
+            "                    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);\n"
+            "                    if (allowMultipleUnslotted)\n"
+            "                        mode = PET_SAVE_NOT_IN_SLOT;\n"
+            "                }\n"
+            "                m_caster->ToPlayer()->RemovePet(pet, mode);\n"
+            "            }\n"
+        )
+        if old in text:
+            text = text.replace(old, new)
+
+    path.write_text(text + "\n")
 PY
 
 # Add tame start/fail logging in spell_hunter.cpp
@@ -424,6 +496,89 @@ if tame_start is not None:
                     text[idx:end + 1] = new_block
 
 path.write_text("\n".join(text) + "\n")
+PY
+  run_py <<'PY'
+from pathlib import Path
+
+path = Path("src/server/game/Spells/SpellEffects.cpp")
+if path.exists():
+    text = path.read_text().splitlines()
+
+    def find_func(name):
+        for i, line in enumerate(text):
+            if line.startswith(f"void Spell::{name}"):
+                return i
+        return None
+
+    def find_block(start):
+        brace = None
+        for i in range(start, len(text)):
+            if text[i].strip() == "{":
+                brace = i
+                break
+        if brace is None:
+            return None, None
+        depth = 0
+        for i in range(brace, len(text)):
+            if text[i].strip() == "{":
+                depth += 1
+            if text[i].strip() == "}":
+                depth -= 1
+                if depth == 0:
+                    return brace, i
+        return None, None
+
+    tame_start = find_func("EffectTameCreature")
+    if tame_start is not None:
+        tb, te = find_block(tame_start)
+        if tb is not None:
+            marker = "    if (m_caster->IsPlayer())"
+            idx = None
+            for i in range(tame_start, te + 1):
+                if text[i] == marker:
+                    idx = i
+                    break
+            if idx is not None and idx + 1 < len(text) and text[idx + 1].strip() == "{":
+                depth = 0
+                end = None
+                for i in range(idx + 1, te + 1):
+                    if text[i].strip() == "{":
+                        depth += 1
+                    if text[i].strip() == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i
+                            break
+                if end is not None:
+                    block = "\n".join(text[idx:end + 1])
+                    if "UPDATE character_pet SET slot = 100" not in block:
+                        new_block = [
+                            "    if (m_caster->IsPlayer())",
+                            "    {",
+                            "        ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();",
+                            "        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
+                            "        LOG_INFO(\"module.bmp\", \"BMP TAME START: player={} guidLow={} targetEntry={} targetGuid={} activePetGuid={} tempUnsummoned={}\",",
+                            "            m_caster->GetName(), ownerLow, creatureTarget->GetEntry(), creatureTarget->GetGUID().GetCounter(),",
+                            "            m_caster->GetPetGUID().GetCounter(), m_caster->ToPlayer()->GetTemporaryUnsummonedPetNumber());",
+                            "        LOG_INFO(\"module.bmp\", \"BMP TAME SAVE: player={} guidLow={} newPetNumber={}\",",
+                            "            m_caster->GetName(), ownerLow, newPetNumber);",
+                            "        if (newPetNumber)",
+                            "            CharacterDatabase.Execute(",
+                            "                \"UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}\",",
+                            "                ownerLow, newPetNumber);",
+                            "        pet->SavePetToDB(PET_SAVE_AS_CURRENT);",
+                            "        m_caster->ToPlayer()->PetSpellInitialize();",
+                            "        if (QueryResult q = CharacterDatabase.Query(\"SELECT COUNT(*), SUM(slot = 0), SUM(slot = 100) FROM character_pet WHERE owner = {}\", ownerLow))",
+                            "        {",
+                            "            Field* f = q->Fetch();",
+                            "            LOG_INFO(\"module.bmp\", \"BMP TAME DB: owner={} total={} slot0={} slot100={}\",",
+                            "                ownerLow, f[0].Get<uint64>(), f[1].Get<uint64>(), f[2].Get<uint64>());",
+                            "        }",
+                            "    }",
+                        ]
+                        text[idx:end + 1] = new_block
+
+    path.write_text("\n".join(text) + "\n")
 PY
 fi
 
@@ -712,8 +867,8 @@ SPELL_EFFECTS_PATCH_PRESENT=0
 
 grep -Eq "AddonMessageRouter::Handle" "$CORE_FILE" && HOOK_PRESENT=1
 grep -Eq "namespace[[:space:]]+AddonMessageRouter" "$CORE_FILE" && DECL_PRESENT=1
-grep -Eq "SavePetStateWithoutSlot" "$PET_FILE" && PET_PATCH_PRESENT=1
-grep -Eq "CHAR_UPD_CHAR_PET_NO_SLOT" "$DB_FILE" && DB_PATCH_PRESENT=1
+grep -Eq "SavePetStateWithoutSlot" src/server/game/Entities/Pet/Pet.h && PET_PATCH_PRESENT=1
+grep -Eq "CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" "$DB_FILE" && DB_PATCH_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$SPELL_FILE" && SPELL_PATCH_PRESENT=1
 if [ -f "$SPELL_EFFECTS_FILE" ]; then
@@ -726,13 +881,20 @@ if [ "$FORCE" -eq 0 ] && [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] 
   exit 0
 fi
 
-if [ "$HOOK_PRESENT" -eq 0 ]; then
-  echo "Applying BeastMasterPlus core patch..."
-  if git apply "$PATCH"; then
-    echo "Patch applied."
-    exit 0
+if [ "$HOOK_PRESENT" -eq 0 ] && [ "$PATCH_APPLIED" -eq 0 ]; then
+  if git apply --check "$PATCH" >/dev/null 2>&1; then
+    echo "Applying BeastMasterPlus core patch..."
+    if git apply "$PATCH"; then
+      PATCH_APPLIED=1
+      HOOK_PRESENT=1
+      DECL_PRESENT=1
+      echo "Patch applied."
+    else
+      echo "Patch failed (possibly due to partial core changes). Continuing with scripted inserts..."
+    fi
+  else
+    echo "Patch does not apply cleanly; continuing with scripted inserts."
   fi
-  echo "Patch failed (possibly due to partial core changes). Trying partial apply..."
 fi
 
 # Ensure forward declaration exists if the hook call already exists
@@ -742,52 +904,52 @@ if [ "$DECL_PRESENT" -eq 0 ]; then
 fi
 
 # Apply remaining (non-ChatHandler) hunks if needed
-if [ "$PET_PATCH_PRESENT" -eq 0 ] || [ "$DB_PATCH_PRESENT" -eq 0 ] || [ "$TAME_PATCH_PRESENT" -eq 0 ] || [ "$SPELL_PATCH_PRESENT" -eq 0 ] || [ "$SPELL_EFFECTS_PATCH_PRESENT" -eq 0 ]; then
+if [ "$PATCH_APPLIED" -eq 0 ] && { [ "$PET_PATCH_PRESENT" -eq 0 ] || [ "$DB_PATCH_PRESENT" -eq 0 ] || [ "$TAME_PATCH_PRESENT" -eq 0 ] || [ "$SPELL_PATCH_PRESENT" -eq 0 ] || [ "$SPELL_EFFECTS_PATCH_PRESENT" -eq 0 ]; }; then
   echo "Applying remaining BeastMasterPlus core hunks (excluding ChatHandler)..."
   APPLIED=0
 
   if [ "$PET_PATCH_PRESENT" -eq 0 ]; then
-    if git apply --include=src/server/game/Entities/Pet/Pet.cpp --include=src/server/game/Entities/Pet/Pet.h "$PATCH"; then
+    if git apply --check --include=src/server/game/Entities/Pet/Pet.cpp --include=src/server/game/Entities/Pet/Pet.h "$PATCH" >/dev/null 2>&1 && \
+       git apply --include=src/server/game/Entities/Pet/Pet.cpp --include=src/server/game/Entities/Pet/Pet.h "$PATCH"; then
       APPLIED=1
     else
-      echo "ERROR: Pet hunks failed to apply."
-      exit 1
+      echo "WARN: Pet hunks did not apply cleanly; relying on scripted edits."
     fi
   fi
 
   if [ "$DB_PATCH_PRESENT" -eq 0 ]; then
-    if git apply --include=src/server/database/Database/Implementation/CharacterDatabase.cpp --include=src/server/database/Database/Implementation/CharacterDatabase.h "$PATCH"; then
+    if git apply --check --include=src/server/database/Database/Implementation/CharacterDatabase.cpp --include=src/server/database/Database/Implementation/CharacterDatabase.h "$PATCH" >/dev/null 2>&1 && \
+       git apply --include=src/server/database/Database/Implementation/CharacterDatabase.cpp --include=src/server/database/Database/Implementation/CharacterDatabase.h "$PATCH"; then
       APPLIED=1
     else
-      echo "ERROR: CharacterDatabase hunks failed to apply."
-      exit 1
+      echo "WARN: CharacterDatabase hunks did not apply cleanly; relying on scripted edits."
     fi
   fi
 
   if [ "$TAME_PATCH_PRESENT" -eq 0 ]; then
-    if git apply --include=src/server/scripts/Spells/spell_hunter.cpp "$PATCH"; then
+    if git apply --check --include=src/server/scripts/Spells/spell_hunter.cpp "$PATCH" >/dev/null 2>&1 && \
+       git apply --include=src/server/scripts/Spells/spell_hunter.cpp "$PATCH"; then
       APPLIED=1
     else
-      echo "ERROR: spell_hunter hunks failed to apply."
-      exit 1
+      echo "WARN: spell_hunter hunks did not apply cleanly; relying on scripted edits."
     fi
   fi
 
   if [ "$SPELL_PATCH_PRESENT" -eq 0 ]; then
-    if git apply --include=src/server/game/Spells/Spell.cpp "$PATCH"; then
+    if git apply --check --include=src/server/game/Spells/Spell.cpp "$PATCH" >/dev/null 2>&1 && \
+       git apply --include=src/server/game/Spells/Spell.cpp "$PATCH"; then
       APPLIED=1
     else
-      echo "ERROR: Spell.cpp hunks failed to apply."
-      exit 1
+      echo "WARN: Spell.cpp hunks did not apply cleanly; relying on scripted edits."
     fi
   fi
 
   if [ "$SPELL_EFFECTS_PATCH_PRESENT" -eq 0 ]; then
-    if git apply --include=src/server/game/Spells/SpellEffects.cpp "$PATCH"; then
+    if git apply --check --include=src/server/game/Spells/SpellEffects.cpp "$PATCH" >/dev/null 2>&1 && \
+       git apply --include=src/server/game/Spells/SpellEffects.cpp "$PATCH"; then
       APPLIED=1
     else
-      echo "ERROR: SpellEffects.cpp hunks failed to apply."
-      exit 1
+      echo "WARN: SpellEffects.cpp hunks did not apply cleanly; relying on scripted edits."
     fi
   fi
 
@@ -799,5 +961,28 @@ fi
 # Insert hook call if missing
 if [ "$HOOK_PRESENT" -eq 0 ]; then
   echo "Inserting AddonMessageRouter hook call..."
-  perl -0777 -i -pe 's/(AddonChannelCommandHandler\(this\)\.ParseCommands\(msg\.c_str\(\)\)\n\s*return;\n)/$1            if (AddonMessageRouter::Handle(this, msg))\n                return;\n/s' "$CORE_FILE"
+  run_py <<'PY'
+from pathlib import Path
+
+path = Path("src/server/game/Handlers/ChatHandler.cpp")
+if path.exists():
+    lines = path.read_text().splitlines()
+    if any("AddonMessageRouter::Handle" in l for l in lines):
+        raise SystemExit(0)
+
+    for i, line in enumerate(lines):
+        if "AddonChannelCommandHandler(this).ParseCommands(msg.c_str())" in line:
+            # find the next return line
+            for j in range(i + 1, min(len(lines), i + 6)):
+                if lines[j].strip() == "return;":
+                    indent = line[:len(line) - len(line.lstrip())]
+                    insert = [
+                        f"{indent}if (AddonMessageRouter::Handle(this, msg))",
+                        f"{indent}    return;",
+                    ]
+                    lines[j + 1:j + 1] = insert
+                    path.write_text("\n".join(lines) + "\n")
+                    raise SystemExit(0)
+            break
+PY
 fi

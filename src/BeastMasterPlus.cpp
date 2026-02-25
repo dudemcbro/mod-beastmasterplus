@@ -333,7 +333,7 @@ namespace
 
             for (PetRow& row : rows)
             {
-                if (row.slot == PET_SAVE_AS_CURRENT && (!activePetGuid || row.petNumber != activePetGuid))
+                if (row.slot == PET_SAVE_AS_CURRENT && activePetGuid && row.petNumber != activePetGuid)
                 {
                     CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID);
                     stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));

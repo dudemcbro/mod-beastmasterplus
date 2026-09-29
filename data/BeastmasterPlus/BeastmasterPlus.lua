@@ -506,6 +506,49 @@ function HSP.ProcessPetBuffer()
     end
 end
 
+-- Readable text for server error codes ("CODE" or "CODE|argument").
+local SERVER_ERROR_TEXT = {
+    NOT_HUNTER = "Only hunters can use Beastmaster Plus.",
+    PAYLOAD_TOO_LARGE = "Request too large.",
+    BAD_VERSION = "Addon and server versions do not match.",
+    NO_PERM = "You do not have permission to do that.",
+    BAD_SUMMON = "Invalid summon request.",
+    BAD_DISMISS = "Invalid dismiss request.",
+    NO_PET = "That pet was not found.",
+    PLAYER_DEAD = "You cannot summon a pet while dead.",
+    IN_FLIGHT = "You cannot summon a pet while on a flight path.",
+    MOUNTED = "You cannot summon a pet while mounted.",
+    IN_VEHICLE = "You cannot summon a pet while in a vehicle.",
+    IN_COMBAT = "You cannot summon a pet while in combat.",
+    CASTING = "You cannot summon a pet while casting.",
+    CHARMED = "You cannot summon a pet while controlling or being controlled by another unit.",
+    NOT_NOW = "You cannot summon a pet right now.",
+    IN_ARENA = "You cannot swap pets in an arena.",
+    IN_BATTLEGROUND = "You cannot swap pets in a battleground.",
+    COOLDOWN = "Pet summon is on cooldown (%s s left).",
+    ALREADY_ACTIVE = "That pet is already summoned.",
+    NEED_STABLE_MASTER = "That pet is in a stable slot. Visit a stable master to take it out.",
+    ACTIVE_NOT_HUNTER_PET = "Dismiss your current summon first.",
+    PETINFO_MISSING = "Pet data could not be loaded.",
+    SUMMON_FAILED = "The pet could not be summoned.",
+    NO_ACTIVE_PET = "You have no active pet.",
+    NOT_ACTIVE = "That pet is not your active pet.",
+    THROTTLED = "Too many requests. Please wait a few seconds.",
+    UNKNOWN_CMD = "Unknown request.",
+}
+
+function HSP.DescribeServerError(errMsg)
+    local code, arg = errMsg:match("^([^|]+)|?(.*)$")
+    local text = code and SERVER_ERROR_TEXT[code]
+    if not text then
+        return errMsg
+    end
+    if text:find("%%s") then
+        return text:format(arg ~= "" and arg or "?")
+    end
+    return text
+end
+
 -- Handle server payload (called from OnAddonMessage after filtering)
 function HSP.HandleServerPayload(msg)
     if not msg or msg == "" then return end
@@ -573,7 +616,11 @@ function HSP.HandleServerPayload(msg)
     elseif msg:find("^ERROR|") then
         local errMsg = tostring(msg:sub(7) or "Unknown error")
         Warn("Server error: %s", errMsg)
-        print("|cFFFF0000BMP Error:|r " .. errMsg)
+        local errText = HSP.DescribeServerError(errMsg)
+        print("|cFFFF0000BMP Error:|r " .. errText)
+        if UIErrorsFrame then
+            UIErrorsFrame:AddMessage(errText, 1.0, 0.1, 0.1, 1.0)
+        end
         
         -- Handle NO_PET error: clear stuck state and auto-refresh after delay
         if errMsg == "NO_PET" or errMsg:find("NO_PET") then

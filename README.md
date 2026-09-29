@@ -11,6 +11,12 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 - Avoids stable logic, slots, and NPC flows
 - Owns the AddonMessageRouter implementation (core only forward-declares it)
 
+## Requirements
+- AzerothCore WotLK (3.3.5a). The core patch was checked against the
+  mod-playerbots fork of azerothcore-wotlk (commit 2d2a522, January 2026).
+- bash, git, python3 and perl on the machine that applies the core patch.
+- The BeastmasterPlus client addon (see below).
+
 ## Installation (fresh server)
 
 1) Copy module into AzerothCore:
@@ -25,6 +31,16 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
    # If a partial hook already exists, the script will add any missing pieces.
    # Use --force to re-apply if core changed or patch defaults were updated:
    #   modules/mod-beastmasterplus/patches/apply-core-addon-hook.sh --force
+   # Run it from the AzerothCore repo root. It is safe to run more than once.
+   # Besides core-beastmasterplus.normalized.patch it edits these core files
+   # directly (review with `git diff` afterwards):
+   #   Handlers/ChatHandler.cpp, Handlers/PetHandler.cpp, Entities/Pet/Pet.cpp,
+   #   Entities/Pet/Pet.h, Entities/Player/Player.cpp, Entities/Unit/Unit.cpp,
+   #   Spells/Spell.cpp, Spells/SpellEffects.cpp, scripts/Spells/spell_hunter.cpp,
+   #   database/.../CharacterDatabase.cpp and CharacterDatabase.h
+   # If your core already ships its own AddonMessageRouter implementation
+   # (some custom forks do), keep only one of the two implementations or the
+   # symbols AddonMessageRouter::RegisterHandler/Handle are defined twice.
 
 3) Configure (optional but recommended):
    cp modules/mod-beastmasterplus/conf/mod_beastmasterplus.conf.dist \
@@ -37,8 +53,10 @@ BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
 4) Build:
    ./acore.sh compiler
 
-5) Apply SQL (optional test data only; dev-only, can delete pets for @owner):
-   sql/world/base/optional_seed_bmp_test_pets.sql
+5) SQL: none is required. The module does not add tables and nothing is
+   auto-imported. For development only, sql/characters/optional_seed_bmp_test_pets.sql
+   seeds test pets into the CHARACTERS database for one character. It deletes
+   that character's existing pets first; read the header before running it.
 
 ## Notes
 - This module intentionally does not modify stable limits
@@ -85,8 +103,9 @@ This module requires the BeastMasterPlus addon on the client.
 - conf/  
   Module configuration templates
 
-- sql/world/base/optional_seed_bmp_test_pets.sql  
-  Optional test data only (not required for normal operation)
+- sql/characters/optional_seed_bmp_test_pets.sql  
+  Optional dev/test data for the characters DB (not required for normal operation)
 
 - patches/  
-  Combined core patch (addon routing + pet-save changes) and apply script
+  Core patch (addon routing + pet-save changes) and the apply script that
+  applies it and performs the remaining scripted core edits

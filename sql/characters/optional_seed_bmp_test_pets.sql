@@ -1,11 +1,22 @@
--- Seed BMP test pets for a specific owner.
--- Usage: set @owner to character guid low, set @n to desired pet count.
+-- DEV/TEST ONLY. Seed BMP test pets for a specific character.
+-- Run against the CHARACTERS database. Reads creature data from the world
+-- database, which is assumed to be named acore_world (edit the
+-- acore_world references below if yours differs).
+--
+-- Usage (in the same MySQL session):
+--   SET @owner := <characters.guid of the hunter>;
+--   SET @n := 99;  -- optional, number of pets to create
+--   SOURCE sql/characters/optional_seed_bmp_test_pets.sql;
+--
+-- WARNING: deletes ALL existing pets of @owner first.
+-- Run it while worldserver is stopped: pet ids are taken from MAX(id) and
+-- would collide with pet numbers a running server hands out.
+-- If @owner is not set, nothing is deleted or inserted.
 
-SET @owner := IFNULL(@owner, 12);
 SET @n := IFNULL(@n, 99);
 
 -- Wipe pets for this owner (optional; comment out to keep existing pets)
-DELETE FROM character_pet WHERE owner = @owner;
+DELETE FROM character_pet WHERE @owner IS NOT NULL AND owner = @owner;
 
 -- Tameable, non-exotic beasts
 DROP TEMPORARY TABLE IF EXISTS tmp_tameable;
@@ -71,7 +82,8 @@ SELECT
   UNIX_TIMESTAMP(),
   ''
 FROM tmp_tameable t
-LEFT JOIN tmp_model tm ON tm.CreatureID = t.entry;
+LEFT JOIN tmp_model tm ON tm.CreatureID = t.entry
+WHERE @owner IS NOT NULL;
 
 -- Verify
 SELECT COUNT(*) AS pet_count FROM character_pet WHERE owner = @owner;

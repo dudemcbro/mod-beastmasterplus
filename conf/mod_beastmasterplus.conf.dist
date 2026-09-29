@@ -9,3 +9,23 @@
 # Default: 1 (enabled)
 #
 BeastMasterPlus.AllowMultipleUnslottedPets = 1
+
+#
+# Minimum time in seconds between two pet summons through the addon
+# (SUMMON request) for one player. 0 disables the cooldown.
+#
+# Default: 10
+#
+BeastMasterPlus.Summon.Cooldown = 10
+
+#
+# Allow summoning pets through the addon inside battlegrounds.
+# Summoning in arenas is always refused. Outside of these, a summon is also
+# refused while dead, in combat, mounted, on a flight path, in a vehicle or
+# while casting, and pets in a real stable slot (1-4) can only be taken out
+# near a stable master.
+#
+# Default: 0 (disabled)
+#
+BeastMasterPlus.Summon.AllowInBattleground = 0
+

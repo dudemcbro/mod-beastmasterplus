@@ -1,18 +1,25 @@
-#include "Chat.h"
-#include "DatabaseEnv.h"
-#include "Log.h"
 #include "BmpAddonMessageRouter.h"
+#include "CellImpl.h"
+#include "Chat.h"
 #include "Common.h"
+#include "Config.h"
+#include "DatabaseEnv.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 #include "Group.h"
+#include "Log.h"
 #include "Opcodes.h"
 #include "Pet.h"
 #include "Player.h"
+#include "ScriptMgr.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -21,6 +28,157 @@
 namespace
 {
     constexpr char kWirePrefix[] = "BMP\t";
+
+    using Clock = std::chrono::steady_clock;
+
+    struct BmpConfig
+    {
+        // Minimum time between two successful SUMMON requests of one player.
+        std::chrono::milliseconds summonCooldown{ std::chrono::seconds(10) };
+        // Allow SUMMON inside battlegrounds (arenas are always refused).
+        bool summonInBattleground = false;
+    };
+
+    BmpConfig sBmpConfig;
+
+    void LoadBmpConfig()
+    {
+        sBmpConfig.summonCooldown = std::chrono::seconds(sConfigMgr->GetOption<uint32>("BeastMasterPlus.Summon.Cooldown", 10));
+        sBmpConfig.summonInBattleground = sConfigMgr->GetOption<bool>("BeastMasterPlus.Summon.AllowInBattleground", false);
+    }
+
+    // Per-player SUMMON cooldown state.
+    struct PlayerSummonState
+    {
+        Clock::time_point lastSummon{};
+        bool hasSummoned = false;
+    };
+
+    std::mutex sPlayerStateLock;
+    std::unordered_map<ObjectGuid::LowType, PlayerSummonState> sPlayerState;
+
+    // Seconds left on the SUMMON cooldown, 0 when a summon is allowed.
+    uint32 GetSummonCooldownLeft(ObjectGuid::LowType playerLow)
+    {
+        if (sBmpConfig.summonCooldown.count() <= 0)
+            return 0;
+
+        std::lock_guard<std::mutex> lock(sPlayerStateLock);
+        auto itr = sPlayerState.find(playerLow);
+        if (itr == sPlayerState.end() || !itr->second.hasSummoned)
+            return 0;
+
+        Clock::duration const elapsed = Clock::now() - itr->second.lastSummon;
+        if (elapsed >= sBmpConfig.summonCooldown)
+            return 0;
+
+        auto const left = std::chrono::duration_cast<std::chrono::milliseconds>(sBmpConfig.summonCooldown - elapsed);
+        return uint32((left.count() + 999) / 1000);
+    }
+
+    void StartSummonCooldown(ObjectGuid::LowType playerLow)
+    {
+        std::lock_guard<std::mutex> lock(sPlayerStateLock);
+        PlayerSummonState& state = sPlayerState[playerLow];
+        state.lastSummon = Clock::now();
+        state.hasSummoned = true;
+    }
+
+    void ForgetPlayer(ObjectGuid::LowType playerLow)
+    {
+        std::lock_guard<std::mutex> lock(sPlayerStateLock);
+        sPlayerState.erase(playerLow);
+    }
+
+    // Matches a creature the player can use as a stable master right now,
+    // with the same rules the core applies to stable packets.
+    struct StableMasterInRangeCheck
+    {
+        explicit StableMasterInRangeCheck(Player* player) : _player(player) { }
+
+        bool operator()(Creature* creature) const
+        {
+            return creature->HasNpcFlag(UNIT_NPC_FLAG_STABLEMASTER)
+                && _player->GetNPCIfCanInteractWith(creature->GetGUID(), UNIT_NPC_FLAG_STABLEMASTER);
+        }
+
+    private:
+        Player* _player;
+    };
+
+    // Pets in the real stable slots (1..4) may only be taken out at a stable
+    // master, like with the core's CMSG_UNSTABLE_PET / CMSG_STABLE_SWAP_PET
+    // (see WorldSession::CheckStableMaster). GMs and players with an open
+    // stable aura are allowed as well.
+    bool CanAccessStable(Player* player)
+    {
+        if (player->IsGameMaster() || player->HasOpenStableAura())
+            return true;
+
+        Creature* stableMaster = nullptr;
+        StableMasterInRangeCheck check(player);
+        Acore::CreatureSearcher<StableMasterInRangeCheck> searcher(player, stableMaster, check);
+        Cell::VisitObjects(player, searcher, INTERACTION_DISTANCE);
+        return stableMaster != nullptr;
+    }
+
+    bool IsInStableSlot(Player* player, uint32 petNumber, uint32 dbSlot)
+    {
+        if (dbSlot >= uint32(PET_SAVE_FIRST_STABLE_SLOT) && dbSlot <= uint32(PET_SAVE_LAST_STABLE_SLOT))
+            return true;
+
+        if (PetStable const* stable = player->GetPetStable())
+        {
+            for (Optional<PetStable::PetInfo> const& pet : stable->StabledPets)
+                if (pet && pet->PetNumber == petNumber)
+                    return true;
+        }
+
+        return false;
+    }
+
+    // Player state checks for SUMMON. Mirrors what stops the core from
+    // calling or swapping a pet: no summoning while dead, in combat,
+    // mounted, on a taxi, in a vehicle, while casting or in an arena.
+    // Returns an error code for the addon, or nullptr when summoning is
+    // allowed.
+    char const* GetSummonBlocker(Player* player)
+    {
+        if (!player->IsAlive())
+            return "PLAYER_DEAD";
+
+        if (player->IsInFlight())
+            return "IN_FLIGHT";
+
+        if (player->IsMounted())
+            return "MOUNTED";
+
+        if (player->GetVehicle())
+            return "IN_VEHICLE";
+
+        if (player->IsInCombat())
+            return "IN_COMBAT";
+
+        if (player->IsNonMeleeSpellCast(false))
+            return "CASTING";
+
+        if (player->GetCharmGUID() || player->IsCharmed())
+            return "CHARMED";
+
+        if (player->IsSpectator() || player->IsBeingTeleported() || !player->IsInWorld())
+            return "NOT_NOW";
+
+        if (Map const* map = player->FindMap())
+        {
+            if (map->IsBattleArena())
+                return "IN_ARENA";
+
+            if (map->IsBattleground() && !sBmpConfig.summonInBattleground)
+                return "IN_BATTLEGROUND";
+        }
+
+        return nullptr;
+    }
 
     static std::vector<std::string> Split(std::string const& s, char delim)
     {
@@ -445,16 +603,44 @@ namespace
         if (payload.rfind("SUMMON|", 0) == 0)
         {
             std::string arg = payload.substr(7);
-            if (!IsNumber(arg))
+            if (!IsNumber(arg) || arg.size() > 10)
             {
                 SendError(session, "BAD_SUMMON");
                 return;
             }
 
-            uint32 petNumber = static_cast<uint32>(std::strtoul(arg.c_str(), nullptr, 10));
+            // Cheap state checks first, before any DB work or touching the
+            // active pet, so a refused request changes nothing.
+            if (char const* blocker = GetSummonBlocker(player))
+            {
+                SendError(session, blocker);
+                return;
+            }
+
             ObjectGuid::LowType ownerLow = player->GetGUID().GetCounter();
+            if (uint32 cooldownLeft = GetSummonCooldownLeft(ownerLow))
+            {
+                SendError(session, "COOLDOWN|" + std::to_string(cooldownLeft));
+                return;
+            }
+
+            uint32 petNumber = static_cast<uint32>(std::strtoul(arg.c_str(), nullptr, 10));
+
+            Pet* oldPet = player->GetPet();
+            if (oldPet && !oldPet->IsHunterPet())
+            {
+                SendError(session, "ACTIVE_NOT_HUNTER_PET");
+                return;
+            }
+
+            if (oldPet && oldPet->GetCharmInfo() && oldPet->GetCharmInfo()->GetPetNumber() == petNumber)
+            {
+                SendError(session, "ALREADY_ACTIVE");
+                return;
+            }
+
             QueryResult result = CharacterDatabase.Query(
-                "SELECT id, name FROM character_pet WHERE owner = {} AND id = {} LIMIT 1",
+                "SELECT id, name, slot FROM character_pet WHERE owner = {} AND id = {} LIMIT 1",
                 ownerLow, petNumber);
 
             if (!result)
@@ -466,22 +652,18 @@ namespace
             Field* fields = result->Fetch();
             uint32 petGuid = fields[0].Get<uint32>();
             std::string petName = fields[1].Get<std::string>();
+            uint32 petSlot = fields[2].Get<uint8>();
 
-            if (!player->IsAlive())
+            // Pets in the real stable slots need a stable master, like the
+            // core's stable window. BMP's own storage (unslotted pets) does not.
+            if (IsInStableSlot(player, petGuid, petSlot) && !CanAccessStable(player))
             {
-                SendError(session, "PLAYER_DEAD");
+                SendError(session, "NEED_STABLE_MASTER");
                 return;
             }
 
-            if (Pet* oldPet = player->GetPet())
-            {
-                if (!oldPet->IsHunterPet())
-                {
-                    SendError(session, "ACTIVE_NOT_HUNTER_PET");
-                    return;
-                }
+            if (oldPet)
                 DetachActivePetNoSave(player);
-            }
 
             if (!EnsurePetInfo(player, petGuid))
             {
@@ -509,6 +691,8 @@ namespace
                 SendError(session, "SUMMON_FAILED");
                 return;
             }
+
+            StartSummonCooldown(ownerLow);
 
             SendBmp(session, "SUMMONED|" + SanitizeName(petName));
             SendOk(session, "SUMMONED|" + SanitizeName(petName));
@@ -570,6 +754,29 @@ namespace
     }
 }
 
+class BmpWorldScript : public WorldScript
+{
+public:
+    BmpWorldScript() : WorldScript("BmpWorldScript", { WORLDHOOK_ON_AFTER_CONFIG_LOAD }) { }
+
+    void OnAfterConfigLoad(bool /*reload*/) override
+    {
+        LoadBmpConfig();
+    }
+};
+
+class BmpPlayerScript : public PlayerScript
+{
+public:
+    BmpPlayerScript() : PlayerScript("BmpPlayerScript", { PLAYERHOOK_ON_LOGOUT }) { }
+
+    void OnPlayerLogout(Player* player) override
+    {
+        if (player)
+            ForgetPlayer(player->GetGUID().GetCounter());
+    }
+};
+
 namespace BmpRouter
 {
     // This function is called by your core from ChatHandler.cpp when CHAT_MSG_ADDON is received.
@@ -599,5 +806,7 @@ namespace BmpRouter
     void Register()
     {
         AddonMessageRouter::RegisterHandler(&TryHandleAddon);
+        new BmpWorldScript();
+        new BmpPlayerScript();
     }
 }

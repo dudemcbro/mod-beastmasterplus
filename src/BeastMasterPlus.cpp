@@ -715,6 +715,7 @@ namespace
             if (oldPet)
                 DetachActivePetNoSave(player);
 
+            bool insertedPetInfo = false;
             if (!EnsurePetInfo(player, petGuid))
             {
                 if (!InsertPetInfoFromDb(player, petGuid, petNumber))
@@ -722,6 +723,7 @@ namespace
                     SendError(session, "PETINFO_MISSING");
                     return;
                 }
+                insertedPetInfo = true;
             }
 
             Pet* newPet = new Pet(player, HUNTER_PET);
@@ -729,13 +731,19 @@ namespace
             {
                 delete newPet;
 
-                PetStable* stable = player->GetPetStable();
-                if (stable)
+                // Only undo the in-memory record this request added. A record
+                // that was already there matches a DB row that still exists,
+                // so removing it would hide the pet from Call Pet and the
+                // stable until the next login.
+                if (insertedPetInfo)
                 {
-                    auto itr = std::find_if(stable->UnslottedPets.begin(), stable->UnslottedPets.end(),
-                        [petGuid](PetStable::PetInfo const& pet) { return pet.PetNumber == petGuid; });
-                    if (itr != stable->UnslottedPets.end())
-                        stable->UnslottedPets.erase(itr);
+                    if (PetStable* stable = player->GetPetStable())
+                    {
+                        auto itr = std::find_if(stable->UnslottedPets.begin(), stable->UnslottedPets.end(),
+                            [petGuid](PetStable::PetInfo const& pet) { return pet.PetNumber == petGuid; });
+                        if (itr != stable->UnslottedPets.end())
+                            stable->UnslottedPets.erase(itr);
+                    }
                 }
 
                 SendError(session, "SUMMON_FAILED");

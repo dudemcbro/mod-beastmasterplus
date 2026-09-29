@@ -15,8 +15,8 @@ client addon.
 - The extended storage does not use stable slots or stable master NPCs.
   Pets in the regular stable slots (1-4) still follow the core's stable
   rules, see [Summon rules](#summon-rules).
-- The module owns the `AddonMessageRouter` implementation (the core patch
-  only forward-declares it).
+- The module provides the `AddonMessageRouter` implementation when the core
+  does not ship one (the core patch only forward-declares it).
 
 ## Summon rules
 
@@ -81,10 +81,10 @@ once.
      `CharacterDatabase.h` under `src/server/database/Database/Implementation/`.
    - The `AddonMessageRouter` implementation is provided by this module in
      `src/BmpAddonMessageRouter.h` and `src/BmpAddonMessageRouter.cpp`. Some
-     custom forks already ship their own implementation of the same two
-     functions. The two are identical, so with the default static build only
-     one of them is linked; if your linker reports duplicate symbols, keep
-     only one of them.
+     custom forks already ship their own `AddonMessageRouter.h` and `.cpp`
+     in `src/server/game/Chat/`. The module detects that header at compile
+     time and then leaves the definitions to the core, so exactly one copy
+     is built either way.
 
 3. Re-run CMake and rebuild the core, for example:
 

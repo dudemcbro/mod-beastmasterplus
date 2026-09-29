@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- The module only defines `AddonMessageRouter` when the core does not ship
+  its own `AddonMessageRouter.h`, so cores that include it no longer get a
+  second copy of the same functions
 - SUMMON is now refused while dead, in combat, mounted, on a flight path, in
   a vehicle, while casting, while charmed or controlling a unit, in arenas
   and (unless `BeastMasterPlus.Summon.AllowInBattleground = 1`) in

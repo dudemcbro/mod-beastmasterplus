@@ -37,6 +37,9 @@ namespace
         std::chrono::milliseconds summonCooldown{ std::chrono::seconds(10) };
         // Allow SUMMON inside battlegrounds (arenas are always refused).
         bool summonInBattleground = false;
+        // At most requestLimit addon requests per requestWindow and player.
+        uint32 requestLimit = 10;
+        std::chrono::milliseconds requestWindow{ std::chrono::seconds(10) };
     };
 
     BmpConfig sBmpConfig;
@@ -45,17 +48,56 @@ namespace
     {
         sBmpConfig.summonCooldown = std::chrono::seconds(sConfigMgr->GetOption<uint32>("BeastMasterPlus.Summon.Cooldown", 10));
         sBmpConfig.summonInBattleground = sConfigMgr->GetOption<bool>("BeastMasterPlus.Summon.AllowInBattleground", false);
+        sBmpConfig.requestLimit = sConfigMgr->GetOption<uint32>("BeastMasterPlus.RequestLimit.Count", 10);
+        sBmpConfig.requestWindow = std::chrono::seconds(std::max<uint32>(1, sConfigMgr->GetOption<uint32>("BeastMasterPlus.RequestLimit.Window", 10)));
     }
 
-    // Per-player SUMMON cooldown state.
-    struct PlayerSummonState
+    // Per-player request state. The core's addon flood limit is loose, a chat
+    // mute does not stop addon messages from reaching this handler, and
+    // several requests run synchronous DB queries, so every BMP request is
+    // rate limited here.
+    struct PlayerRequestState
     {
+        Clock::time_point windowStart{};
+        uint32 requestsInWindow = 0;
+        bool throttleReported = false;
         Clock::time_point lastSummon{};
         bool hasSummoned = false;
     };
 
     std::mutex sPlayerStateLock;
-    std::unordered_map<ObjectGuid::LowType, PlayerSummonState> sPlayerState;
+    std::unordered_map<ObjectGuid::LowType, PlayerRequestState> sPlayerState;
+
+    // Returns false when the request must be dropped. reportThrottle is set
+    // for the first dropped request of a window, so the client is told once
+    // instead of receiving one error per dropped message.
+    bool ConsumeRequest(ObjectGuid::LowType playerLow, bool& reportThrottle)
+    {
+        reportThrottle = false;
+        if (!sBmpConfig.requestLimit)
+            return true;
+
+        Clock::time_point const now = Clock::now();
+        std::lock_guard<std::mutex> lock(sPlayerStateLock);
+        PlayerRequestState& state = sPlayerState[playerLow];
+
+        if (state.requestsInWindow == 0 || now - state.windowStart >= sBmpConfig.requestWindow)
+        {
+            state.windowStart = now;
+            state.requestsInWindow = 0;
+            state.throttleReported = false;
+        }
+
+        if (state.requestsInWindow >= sBmpConfig.requestLimit)
+        {
+            reportThrottle = !state.throttleReported;
+            state.throttleReported = true;
+            return false;
+        }
+
+        ++state.requestsInWindow;
+        return true;
+    }
 
     // Seconds left on the SUMMON cooldown, 0 when a summon is allowed.
     uint32 GetSummonCooldownLeft(ObjectGuid::LowType playerLow)
@@ -79,7 +121,7 @@ namespace
     void StartSummonCooldown(ObjectGuid::LowType playerLow)
     {
         std::lock_guard<std::mutex> lock(sPlayerStateLock);
-        PlayerSummonState& state = sPlayerState[playerLow];
+        PlayerRequestState& state = sPlayerState[playerLow];
         state.lastSummon = Clock::now();
         state.hasSummoned = true;
     }
@@ -392,6 +434,14 @@ namespace
         Player* player = session ? session->GetPlayer() : nullptr;
         if (!player)
             return;
+
+        bool reportThrottle = false;
+        if (!ConsumeRequest(player->GetGUID().GetCounter(), reportThrottle))
+        {
+            if (reportThrottle)
+                SendError(session, "THROTTLED");
+            return;
+        }
 
         if (player->getClass() != CLASS_HUNTER)
         {
@@ -737,13 +787,18 @@ namespace
             LOG_DEBUG("module.bmp", "BMP DISMISS REQ: player={} guidLow={} activePet={} requestedPet={}",
                 player->GetName(), player->GetGUID().GetCounter(), charm->GetPetNumber(), requestedPetNumber);
             player->RemovePet(activePet, PET_SAVE_NOT_IN_SLOT, false);
-            if (QueryResult q = CharacterDatabase.Query(
-                "SELECT COUNT(*), SUM(slot = 0), SUM(slot = 100) FROM character_pet WHERE owner = {}",
-                player->GetGUID().GetCounter()))
+
+            // Diagnostic query, only run when debug logging is enabled.
+            if (sLog->ShouldLog("module.bmp", LOG_LEVEL_DEBUG))
             {
-                Field* f = q->Fetch();
-                LOG_DEBUG("module.bmp", "BMP DISMISS DB: owner={} total={} slot0={} slot100={}",
-                    player->GetGUID().GetCounter(), f[0].Get<uint64>(), f[1].Get<uint64>(), f[2].Get<uint64>());
+                if (QueryResult q = CharacterDatabase.Query(
+                    "SELECT COUNT(*), SUM(slot = 0), SUM(slot = 100) FROM character_pet WHERE owner = {}",
+                    player->GetGUID().GetCounter()))
+                {
+                    Field* f = q->Fetch();
+                    LOG_DEBUG("module.bmp", "BMP DISMISS DB: owner={} total={} slot0={} slot100={}",
+                        player->GetGUID().GetCounter(), f[0].Get<uint64>(), f[1].Get<uint64>(), f[2].Get<uint64>());
+                }
             }
             SendBmp(session, "DISMISSED|" + SanitizeName(petName));
             SendOk(session, "DISMISSED|" + SanitizeName(petName));

@@ -29,3 +29,16 @@ BeastMasterPlus.Summon.Cooldown = 10
 #
 BeastMasterPlus.Summon.AllowInBattleground = 0
 
+#
+# Rate limit for all addon requests (LIST, SUMMON, DISMISS, ...) of one
+# player: at most RequestLimit.Count requests per RequestLimit.Window
+# seconds. The core's addon flood limit (ChatFlood.AddonMessageCount) is
+# loose, a chat mute does not stop addon messages from reaching this module,
+# and several requests run database queries. Requests over the limit are
+# dropped and the addon is told once per window.
+# Set RequestLimit.Count to 0 to disable the limit.
+#
+# Default: 10 requests per 10 seconds
+#
+BeastMasterPlus.RequestLimit.Count = 10
+BeastMasterPlus.RequestLimit.Window = 10

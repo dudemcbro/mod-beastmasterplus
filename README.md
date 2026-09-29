@@ -1,111 +1,198 @@
 # mod-beastmasterplus
 
-BeastMasterPlus (HunterStablePlus) module for AzerothCore WotLK.
+BeastMasterPlus (HunterStablePlus) is an [AzerothCore](https://www.azerothcore.org/)
+(WotLK 3.3.5a) module that gives hunters extended pet storage, driven by a
+client addon.
 
 ## What this module does
-- Server authoritative extended hunter pet storage
-- No retame
-- No pet delete or recreate
-- Pets persist 1:1 in DB
-- Addon driven UI over CHAT_MSG_ADDON
-- Avoids stable logic, slots, and NPC flows
-- Owns the AddonMessageRouter implementation (core only forward-declares it)
+
+- Server-authoritative extended hunter pet storage: dismissed pets are kept
+  as unslotted pets (`character_pet.slot = 100`) instead of being lost.
+- No retaming, and pets are never deleted and recreated.
+- Pets persist 1:1 in the `character_pet` table; the module adds no tables.
+- The UI is a client addon that talks to the server over `CHAT_MSG_ADDON`
+  (prefix `BMP`).
+- The extended storage does not use stable slots or stable master NPCs.
+  Pets in the regular stable slots (1-4) still follow the core's stable
+  rules, see [Summon rules](#summon-rules).
+- The module owns the `AddonMessageRouter` implementation (the core patch
+  only forward-declares it).
+
+## Summon rules
+
+Summoning a pet from the addon swaps it with the active pet, so the server
+applies the same limits as the game's own pet swapping. A summon is refused
+with a message in the addon when:
+
+- the hunter is dead, in combat, mounted, on a flight path, in a vehicle,
+  casting, charmed or controlling another unit;
+- the hunter is in an arena, or in a battleground unless
+  `BeastMasterPlus.Summon.AllowInBattleground = 1`;
+- the last summon was less than `BeastMasterPlus.Summon.Cooldown` seconds ago
+  (default 10);
+- the pet is in one of the regular stable slots (1-4) and no stable master is
+  in interaction range. Pets in BMP's own storage (unslotted pets) can be
+  summoned anywhere. GMs and hunters with an open-stable aura skip this check;
+- the pet is already the active pet.
+
+All addon requests (list, summon, dismiss and so on) are also rate limited
+per player: at most `BeastMasterPlus.RequestLimit.Count` requests per
+`BeastMasterPlus.RequestLimit.Window` seconds (default 10 per 10 seconds).
+Requests over the limit are dropped and the addon shows "Too many requests"
+once.
 
 ## Requirements
+
 - AzerothCore WotLK (3.3.5a). The core patch was checked against the
   mod-playerbots fork of azerothcore-wotlk (commit 2d2a522, January 2026).
 - bash, git, python3 and perl on the machine that applies the core patch.
-- The BeastmasterPlus client addon (see below).
+- The BeastmasterPlus client addon (see
+  [Client addon installation](#client-addon-installation-required)).
 
-## Installation (fresh server)
+## Installation
 
-1) Copy module into AzerothCore:
-   modules/mod-beastmasterplus
+1. Clone the module into the core's `modules` folder:
 
-2) Apply required core patch (one time):
-   cd /path/to/azerothcore
+   ```sh
+   cd <azerothcore>/modules
+   git clone https://github.com/dudemcbro/mod-beastmasterplus.git
+   ```
+
+2. Apply the required core patch (once), from the AzerothCore repository
+   root:
+
+   ```sh
+   cd <azerothcore>
    modules/mod-beastmasterplus/patches/apply-core-addon-hook.sh
-   # Applies the full BeastMasterPlus core patch (addon routing + pet-save changes).
-   # The AddonMessageRouter implementation is provided by this module:
-   #   src/BmpAddonMessageRouter.h / src/BmpAddonMessageRouter.cpp
-   # If a partial hook already exists, the script will add any missing pieces.
-   # Use --force to re-apply if core changed or patch defaults were updated:
-   #   modules/mod-beastmasterplus/patches/apply-core-addon-hook.sh --force
-   # Run it from the AzerothCore repo root. It is safe to run more than once.
-   # Besides core-beastmasterplus.normalized.patch it edits these core files
-   # directly (review with `git diff` afterwards):
-   #   Handlers/ChatHandler.cpp, Handlers/PetHandler.cpp, Entities/Pet/Pet.cpp,
-   #   Entities/Pet/Pet.h, Entities/Player/Player.cpp, Entities/Unit/Unit.cpp,
-   #   Spells/Spell.cpp, Spells/SpellEffects.cpp, scripts/Spells/spell_hunter.cpp,
-   #   database/.../CharacterDatabase.cpp and CharacterDatabase.h
-   # If your core already ships its own AddonMessageRouter implementation
-   # (some custom forks do), keep only one of the two implementations or the
-   # symbols AddonMessageRouter::RegisterHandler/Handle are defined twice.
+   ```
 
-3) Configure (optional but recommended):
-   cp modules/mod-beastmasterplus/conf/mod_beastmasterplus.conf.dist \
-      env/dist/etc/modules/mod_beastmasterplus.conf
-   # REQUIRED for extended storage: allow multiple unslotted hunter pets
-   # BeastMasterPlus.AllowMultipleUnslottedPets = 1
-   # If this config is not loaded by the server, the core patch now defaults
-   # AllowMultipleUnslottedPets to true to avoid deleting dismissed pets.
+   - It applies `patches/core-beastmasterplus.normalized.patch` (addon
+     routing and pet save changes) and performs the remaining core edits with
+     scripted fallbacks. If a partial hook already exists, it adds only the
+     missing pieces. It is safe to run more than once.
+   - Use `--force` to re-apply after the core changed or the patch defaults
+     were updated.
+   - Besides the patch it edits these core files directly; review them with
+     `git diff` afterwards: `Handlers/ChatHandler.cpp`,
+     `Handlers/PetHandler.cpp`, `Entities/Pet/Pet.cpp`, `Entities/Pet/Pet.h`,
+     `Entities/Player/Player.cpp`, `Entities/Unit/Unit.cpp`,
+     `Spells/Spell.cpp`, `Spells/SpellEffects.cpp`,
+     `scripts/Spells/spell_hunter.cpp`, and `CharacterDatabase.cpp` /
+     `CharacterDatabase.h` under `src/server/database/Database/Implementation/`.
+   - The `AddonMessageRouter` implementation is provided by this module in
+     `src/BmpAddonMessageRouter.h` and `src/BmpAddonMessageRouter.cpp`. Some
+     custom forks already ship their own implementation of the same two
+     functions. The two are identical, so with the default static build only
+     one of them is linked; if your linker reports duplicate symbols, keep
+     only one of them.
 
-4) Build:
-   ./acore.sh compiler
+3. Re-run CMake and rebuild the core, for example:
 
-5) SQL: none is required. The module does not add tables and nothing is
-   auto-imported. For development only, sql/characters/optional_seed_bmp_test_pets.sql
-   seeds test pets into the CHARACTERS database for one character. It deletes
-   that character's existing pets first; read the header before running it.
+   ```sh
+   ./acore.sh compiler build
+   ```
 
-## Notes
-- This module intentionally does not modify stable limits
-- All pet data remains in character_pet
-- Addon UI is required for interaction
-- AddonMessageRouter is owned by this module (core only forward-declares it)
-- SQL seed is for testing only; do not use on production data
-- If AllowMultipleUnslottedPets is 0, dismissed pets can be removed when taming new ones
-- If AllowMultipleUnslottedPets is 1, the hunter pet action "Abandon" is treated as a dismiss
-  (PET_SAVE_NOT_IN_SLOT / slot 100) to prevent losing pets while taming
-- Dismiss is available via the UI button or `/bmp dismiss <petNumber>` (not permanent)
+   or run `cmake` and `make install` in your build folder. CMake has to run
+   again so it picks up the new module and its config file.
 
-## Client Addon Installation (required)
+4. Set up the config file (see [Configuration](#configuration)).
 
-This module requires the BeastMasterPlus addon on the client.
+5. Install the client addon (see
+   [Client addon installation](#client-addon-installation-required)) and
+   restart `worldserver`.
 
-1) Copy the addon folder to the WoW client:
-   Interface/AddOns/BeastmasterPlus
+## Configuration
 
-   The folder is provided in this module:
-   modules/mod-beastmasterplus/data/BeastmasterPlus
+The build installs `mod_beastmasterplus.conf.dist` into the `modules` folder
+next to `worldserver.conf` (`env/dist/etc/modules/` for `acore.sh` builds).
+`./acore.sh compiler build` copies it to `mod_beastmasterplus.conf` if that
+file does not exist yet. Otherwise copy it yourself:
 
-2) Ensure the addon files exist:
-   - BeastmasterPlus.toc
-   - BeastmasterPlus.lua
-   - BeastmasterPlusUI.lua
+```sh
+cd <config folder>/modules
+cp mod_beastmasterplus.conf.dist mod_beastmasterplus.conf
+```
 
-3) Enable the addon at the character select screen.
+| Option | Default | Description |
+| --- | --- | --- |
+| `BeastMasterPlus.AllowMultipleUnslottedPets` | `1` | Keep several unslotted hunter pets at the same time. Required for the extended storage. Read by the core patch; if the config is not loaded, the patched core defaults to `1` so dismissed pets are not deleted. |
+| `BeastMasterPlus.Summon.Cooldown` | `10` | Seconds between two summons through the addon. `0` disables the cooldown. |
+| `BeastMasterPlus.Summon.AllowInBattleground` | `0` | Allow summons through the addon inside battlegrounds. Arenas are always refused. |
+| `BeastMasterPlus.RequestLimit.Count` | `10` | Addon requests allowed per player and window. `0` disables the limit. |
+| `BeastMasterPlus.RequestLimit.Window` | `10` | Length of the rate limit window in seconds. |
 
-## Notes
-- The server module will load without the addon, but no UI or interaction is possible
-- All user interaction is addon UI only
-- Communication uses CHAT_MSG_ADDON with prefix BMP
-- Dismiss is available via the UI button or `/bmp dismiss <petNumber>`
+Options are re-read on `.reload config`.
+
+Notes on `AllowMultipleUnslottedPets`:
+
+- With `0`, dismissed pets can be removed when taming a new one.
+- With `1`, the hunter pet action "Abandon" is treated as a dismiss
+  (`PET_SAVE_NOT_IN_SLOT`, slot 100) so pets are not lost while taming.
+- Dismiss is available through the addon button or `/bmp dismiss <petNumber>`
+  and is not permanent.
+
+## SQL
+
+None is required. The module adds no tables and nothing is imported
+automatically.
+
+For development only, `sql/characters/optional_seed_bmp_test_pets.sql` seeds
+test pets for one character. Run it manually against the **characters**
+database while `worldserver` is stopped. It deletes that character's
+existing pets first; read the header of the file before using it, and never
+run it on production data.
+
+## Client addon installation (required)
+
+The server module loads without the addon, but all interaction goes through
+the addon UI.
+
+1. Copy the folder [`data/BeastmasterPlus`](data/BeastmasterPlus) to the WoW
+   client as `Interface/AddOns/BeastmasterPlus`.
+2. Check that the folder contains `BeastmasterPlus.toc`,
+   `BeastmasterPlus.lua`, `BeastmasterPlusUI.lua` and
+   `BeastmasterPlusFamilyMap.lua`.
+3. Enable the addon on the character selection screen.
+
+In game, type `/bmp` to open the pet manager and `/bmp help` to list the
+commands. Refused requests are shown in chat and in the red error text at
+the top of the screen.
+
+## Updating
+
+```sh
+cd <azerothcore>/modules/mod-beastmasterplus
+git pull
+```
+
+Then:
+
+1. Run `patches/apply-core-addon-hook.sh` again from the AzerothCore root
+   (with `--force` if the changelog says the patch changed).
+2. Re-run CMake, rebuild and restart `worldserver`.
+3. Compare your `mod_beastmasterplus.conf` with the new
+   `mod_beastmasterplus.conf.dist` and add any new options.
+4. Copy the addon folder to the client again, replacing the old one.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 ## Layout
 
-- src/  
-  Server-side module source code
+| Path | Contents |
+| --- | --- |
+| `src/` | Server-side module source code |
+| `data/BeastmasterPlus/` | Required client addon (copy to `Interface/AddOns/BeastmasterPlus`) |
+| `conf/` | Module configuration template |
+| `sql/characters/` | Optional development seed data for the characters database |
+| `patches/` | Core patch and the script that applies it and performs the remaining core edits |
 
-- data/BeastmasterPlus/  
-  Required client addon (copy to Interface/AddOns/BeastmasterPlus)
+## Contributing
 
-- conf/  
-  Module configuration templates
+Bug reports and pull requests are welcome on
+[GitHub](https://github.com/dudemcbro/mod-beastmasterplus). For larger
+changes, please open an issue first, describe how you tested your change, and
+add a line to [CHANGELOG.md](CHANGELOG.md).
 
-- sql/characters/optional_seed_bmp_test_pets.sql  
-  Optional dev/test data for the characters DB (not required for normal operation)
+## License
 
-- patches/  
-  Core patch (addon routing + pet-save changes) and the apply script that
-  applies it and performs the remaining scripted core edits
+GNU General Public License v3.0, see [LICENSE](LICENSE).

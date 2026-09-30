@@ -1,98 +1,8 @@
-diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
---- a/src/server/game/Handlers/ChatHandler.cpp
-+++ b/src/server/game/Handlers/ChatHandler.cpp
-@@ -41,6 +41,11 @@
- #include "WorldPacket.h"
- #include "WorldSession.h"
- 
-+namespace AddonMessageRouter
-+{
-+    bool Handle(WorldSession* session, std::string const& msg);
-+}
-+
- inline bool isNasty(uint8 c)
- {
-     if (c == '\t')
-@@ -287,6 +292,8 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recvData)
-         {
-             if (AddonChannelCommandHandler(this).ParseCommands(msg.c_str()))
-                 return;
-+            if (AddonMessageRouter::Handle(this, msg))
-+                return;
-         }
-         else
-         {
-diff --git a/src/server/scripts/Spells/spell_hunter.cpp b/src/server/scripts/Spells/spell_hunter.cpp
---- a/src/server/scripts/Spells/spell_hunter.cpp
-+++ b/src/server/scripts/Spells/spell_hunter.cpp
-@@ -17,6 +17,8 @@
- 
- #include "Cell.h"
- #include "CellImpl.h"
-+#include "Config.h"
-+#include "Log.h"
- #include "CreatureScript.h"
- #include "GridNotifiers.h"
- #include "Pet.h"
-diff --git a/src/server/game/Spells/Spell.cpp b/src/server/game/Spells/Spell.cpp
---- a/src/server/game/Spells/Spell.cpp
-+++ b/src/server/game/Spells/Spell.cpp
-@@ -22,6 +22,7 @@
- #include "CharmInfo.h"
- #include "CellImpl.h"
- #include "Common.h"
-+#include "Config.h"
- #include "ConditionMgr.h"
- #include "DisableMgr.h"
- #include "DynamicObject.h"
-@@ -3757,7 +3758,16 @@
-     {
-         if (m_caster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))
-             if (Pet* pet = m_caster->ToPlayer()->GetPet())
--                m_caster->ToPlayer()->RemovePet(pet, PET_SAVE_AS_CURRENT);
-+            {
-+                PetSaveMode mode = PET_SAVE_AS_CURRENT;
-+                if (pet->IsHunterPet())
-+                {
-+                    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
-+                    if (allowMultipleUnslotted)
-+                        mode = PET_SAVE_NOT_IN_SLOT;
-+                }
-+                m_caster->ToPlayer()->RemovePet(pet, mode);
-+            }
- 
-         if (Unit* charm = m_caster->GetCharm())
-             charm->RemoveAurasByType(SPELL_AURA_MOD_CHARM, m_caster->GetGUID());
-diff --git a/src/server/game/Spells/SpellEffects.cpp b/src/server/game/Spells/SpellEffects.cpp
---- a/src/server/game/Spells/SpellEffects.cpp
-+++ b/src/server/game/Spells/SpellEffects.cpp
-@@ -22,6 +22,7 @@
- #include "CellImpl.h"
- #include "Chat.h"
- #include "Common.h"
-+#include "Config.h"
- #include "Creature.h"
- #include "DynamicObject.h"
- #include "Formulas.h"
-@@ -3136,6 +3137,14 @@
- 
-     if (m_caster->IsPlayer())
-     {
-+        ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();
-+        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
-+        LOG_INFO("module.bmp", "BMP TAME SAVE: player={} guidLow={} newPetNumber={}",
-+            m_caster->GetName(), ownerLow, newPetNumber);
-+        if (newPetNumber)
-+            CharacterDatabase.Execute(
-+                "UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}",
-+                ownerLow, newPetNumber);
-         pet->SavePetToDB(PET_SAVE_AS_CURRENT);
-         m_caster->ToPlayer()->PetSpellInitialize();
-     }
 diff --git a/src/server/database/Database/Implementation/CharacterDatabase.cpp b/src/server/database/Database/Implementation/CharacterDatabase.cpp
+index e4dffef..971fab4 100644
 --- a/src/server/database/Database/Implementation/CharacterDatabase.cpp
 +++ b/src/server/database/Database/Implementation/CharacterDatabase.cpp
-@@ -570,6 +570,7 @@
+@@ -585,6 +585,7 @@ void CharacterDatabaseConnection::DoPrepareStatements()
      PrepareStatement(CHAR_DEL_CHAR_PET_BY_OWNER, "DELETE FROM character_pet WHERE owner = ?", CONNECTION_ASYNC);
      PrepareStatement(CHAR_UPD_CHAR_PET_NAME, "UPDATE character_pet SET name = ?, renamed = 1 WHERE owner = ? AND id = ?", CONNECTION_ASYNC);
      PrepareStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID, "UPDATE character_pet SET slot = ? WHERE owner = ? AND id = ?", CONNECTION_ASYNC);
@@ -101,9 +11,10 @@ diff --git a/src/server/database/Database/Implementation/CharacterDatabase.cpp b
      PrepareStatement(CHAR_DEL_CHAR_PET_BY_SLOT, "DELETE FROM character_pet WHERE owner = ? AND (slot = ? OR slot > ?)", CONNECTION_ASYNC);
      PrepareStatement(CHAR_REP_CHAR_PET, "REPLACE INTO character_pet (id, entry, owner, modelid, CreatedBySpell, PetType, level, exp, Reactstate, name, renamed, slot, curhealth, curmana, curhappiness, savetime, abdata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
 diff --git a/src/server/database/Database/Implementation/CharacterDatabase.h b/src/server/database/Database/Implementation/CharacterDatabase.h
+index 431acd5..3a03a0b 100644
 --- a/src/server/database/Database/Implementation/CharacterDatabase.h
 +++ b/src/server/database/Database/Implementation/CharacterDatabase.h
-@@ -484,6 +484,7 @@
+@@ -493,6 +493,7 @@ enum CharacterDatabaseStatements : uint32
      CHAR_SEL_PET_DECLINED_NAME,
      CHAR_UPD_CHAR_PET_NAME,
      CHAR_UPD_CHAR_PET_SLOT_BY_ID,
@@ -112,6 +23,7 @@ diff --git a/src/server/database/Database/Implementation/CharacterDatabase.h b/s
      CHAR_DEL_CHAR_PET_BY_SLOT,
      CHAR_REP_CHAR_PET,
 diff --git a/src/server/game/Entities/Pet/Pet.cpp b/src/server/game/Entities/Pet/Pet.cpp
+index c58f4cc..7ec9e44 100644
 --- a/src/server/game/Entities/Pet/Pet.cpp
 +++ b/src/server/game/Entities/Pet/Pet.cpp
 @@ -20,6 +20,7 @@
@@ -122,14 +34,397 @@ diff --git a/src/server/game/Entities/Pet/Pet.cpp b/src/server/game/Entities/Pet
  #include "DatabaseEnv.h"
  #include "GameTime.h"
  #include "Group.h"
-diff --git a/src/server/game/Entities/Pet/Pet.h b/src/server/game/Entities/Pet/Pet.h
---- a/src/server/game/Entities/Pet/Pet.h
-+++ b/src/server/game/Entities/Pet/Pet.h
-@@ -64,6 +64,7 @@
-     bool LoadPetFromDB(Player* owner, uint32 petEntry, uint32 petnumber, bool current, uint32 healthPct = 0, bool fullMana = false);
-     bool isBeingLoaded() const override { return m_loading; }
-     void SavePetToDB(PetSaveMode mode);
-+    void SavePetStateWithoutSlot();
-     void FillPetInfo(PetStable::PetInfo* petInfo) const;
-     void Remove(PetSaveMode mode, bool returnreagent = false);
-     static void DeleteFromDB(ObjectGuid::LowType guidlow);
+@@ -516,7 +517,11 @@ void Pet::SavePetToDB(PetSaveMode mode)
+     {
+         // pet will lost anyway at restore temporary unsummoned
+         if (getPetType() == HUNTER_PET)
++        {
++            LOG_DEBUG("module.bmp", "BMP SavePetToDB temp unsummoned: owner={} tempPet={} currentPet={} mode={}",
++                owner->GetGUID().GetCounter(), owner->GetTemporaryUnsummonedPetNumber(), m_charmInfo->GetPetNumber(), uint32(mode));
+             return;
++        }
+ 
+         // for warlock case
+         mode = PET_SAVE_NOT_IN_SLOT;
+@@ -551,11 +556,17 @@ void Pet::SavePetToDB(PetSaveMode mode)
+         // prevent existence another hunter pet in PET_SAVE_AS_CURRENT and PET_SAVE_NOT_IN_SLOT
+         if (getPetType() == HUNTER_PET && (mode == PET_SAVE_AS_CURRENT || mode > PET_SAVE_LAST_STABLE_SLOT))
+         {
+-            stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT);
+-            stmt->SetData(0, ownerLowGUID);
+-            stmt->SetData(1, uint8(PET_SAVE_AS_CURRENT));
+-            stmt->SetData(2, uint8(PET_SAVE_LAST_STABLE_SLOT));
+-            trans->Append(stmt);
++            if (mode == PET_SAVE_AS_CURRENT)
++            {
++                LOG_DEBUG("module.bmp", "BMP SAVE: owner={} petNumber={} mode={} move other slot=0 -> NOT_IN_SLOT",
++                    ownerLowGUID, m_charmInfo->GetPetNumber(), uint32(mode));
++                stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT);
++                stmt->SetData(0, uint8(PET_SAVE_NOT_IN_SLOT));
++                stmt->SetData(1, ownerLowGUID);
++                stmt->SetData(2, uint8(PET_SAVE_AS_CURRENT));
++                stmt->SetData(3, m_charmInfo->GetPetNumber());
++                trans->Append(stmt);
++            }
+         }
+ 
+         // save pet
+diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entities/Player/Player.cpp
+index 6049b56..9273829 100644
+--- a/src/server/game/Entities/Player/Player.cpp
++++ b/src/server/game/Entities/Player/Player.cpp
+@@ -9306,6 +9306,13 @@ void Player::RemovePet(Pet* pet, PetSaveMode mode, bool returnreagent)
+         LOG_DEBUG("entities.pet", "RemovePet {}, {}, {}", pet->GetEntry(), mode, returnreagent);
+         if (pet->m_removed)
+             return;
++
++        if (pet->IsHunterPet())
++        {
++            uint32 petNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
++            LOG_DEBUG("module.bmp", "BMP RemovePet: player={} guidLow={} petNumber={} mode={} returnreagent={}",
++                GetName(), GetGUID().GetCounter(), petNumber, uint32(mode), returnreagent);
++        }
+     }
+ 
+     if (returnreagent && (pet || (m_temporaryUnsummonedPetNumber && (!m_session || !m_session->PlayerLogout()))) && !InBattleground())
+@@ -9338,6 +9345,8 @@ void Player::RemovePet(Pet* pet, PetSaveMode mode, bool returnreagent)
+     {
+         if (mode == PET_SAVE_NOT_IN_SLOT && m_petStable && m_petStable->CurrentPet)
+         {
++            LOG_DEBUG("module.bmp", "BMP RemovePet (no active): player={} guidLow={} petNumber={} mode={}",
++                GetName(), GetGUID().GetCounter(), m_petStable->CurrentPet->PetNumber, uint32(mode));
+             // Handle removing pet while it is in "temporarily unsummoned" state, for example on mount
+             CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_SLOT_BY_ID);
+             stmt->SetData(0, PET_SAVE_NOT_IN_SLOT);
+diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
+index 58da7ed..4f811b9 100644
+--- a/src/server/game/Entities/Unit/Unit.cpp
++++ b/src/server/game/Entities/Unit/Unit.cpp
+@@ -30,6 +30,7 @@
+ #include "ChatTextBuilder.h"
+ #include "CombatPackets.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "ConditionMgr.h"
+ #include "Creature.h"
+ #include "CreatureAIImpl.h"
+@@ -13417,8 +13418,22 @@ bool Unit::InitTamedPet(Pet* pet, uint8 level, uint32 spell_id)
+ {
+     Player* player = ToPlayer();
+     PetStable& petStable = player->GetOrInitPetStable();
+-    if (petStable.CurrentPet || petStable.GetUnslottedHunterPet())
+-        return false;
++    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++    if (!allowMultipleUnslotted)
++    {
++        if (petStable.CurrentPet || petStable.GetUnslottedHunterPet())
++            return false;
++    }
++    else
++    {
++        if (petStable.CurrentPet && !player->GetPetGUID())
++        {
++            petStable.UnslottedPets.push_back(std::move(*petStable.CurrentPet));
++            petStable.CurrentPet.reset();
++        }
++        if (player->GetPetGUID())
++            return false;
++    }
+ 
+     pet->SetCreatorGUID(GetGUID());
+     pet->SetFaction(GetFaction());
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+index 8adb051..c696d6b 100644
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -43,6 +43,13 @@
+ #include "WorldPacket.h"
+ #include "WorldSession.h"
+ 
++// mod-beastmasterplus provides AddonMessageRouter in src/BmpAddonMessageRouter.*
++namespace AddonMessageRouter
++{
++    bool Handle(WorldSession* session, std::string const& msg);
++}
++
++
+ inline bool isNasty(uint8 c)
+ {
+     if (c == '\t')
+@@ -301,6 +308,8 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recvData)
+         {
+             if (AddonChannelCommandHandler(this).ParseCommands(msg.c_str()))
+                 return;
++            if (AddonMessageRouter::Handle(this, msg))
++                return;
+         }
+         else
+         {
+diff --git a/src/server/game/Handlers/PetHandler.cpp b/src/server/game/Handlers/PetHandler.cpp
+index 34f3070..f57bf90 100644
+--- a/src/server/game/Handlers/PetHandler.cpp
++++ b/src/server/game/Handlers/PetHandler.cpp
+@@ -285,12 +285,21 @@ void WorldSession::HandlePetActionHelper(Unit* pet, ObjectGuid guid1, uint32 spe
+                         if (pet->IsPet())
+                         {
+                             if (pet->ToPet()->getPetType() == HUNTER_PET)
+-                                GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+-                            else
+                             {
+-                                pet->SendPetDismissSound();
+-                                //dismissing a summoned pet is like killing them (this prevents returning a soulshard...)
+-                                pet->setDeathState(DeathState::Corpse);
++                                uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
++                                bool allowMultiple = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++                                if (allowMultiple)
++                                {
++                                    LOG_DEBUG("module.bmp", "BMP ABANDON (pet action)->DISMISS: player={} guidLow={} petNumber={}",
++                                        GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
++                                    GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_NOT_IN_SLOT);
++                                }
++                                else
++                                {
++                                    LOG_DEBUG("module.bmp", "BMP ABANDON (pet action): player={} guidLow={} petNumber={}",
++                                        GetPlayer()->GetName(), GetPlayer()->GetGUID().GetCounter(), petNumber);
++                                    GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
++                                }
+                             }
+                         }
+                         else if (pet->HasUnitTypeMask(UNIT_MASK_MINION | UNIT_MASK_SUMMON | UNIT_MASK_GUARDIAN | UNIT_MASK_CONTROLLABLE_GUARDIAN))
+@@ -945,6 +954,9 @@ void WorldSession::HandlePetAbandon(WorldPackets::Pet::PetAbandon& packet)
+                 pet->SetPower(POWER_HAPPINESS, feelty > 50000 ? (feelty - 50000) : 0);
+             }
+ 
++            uint32 petNumber = pet->ToPet()->GetCharmInfo() ? pet->ToPet()->GetCharmInfo()->GetPetNumber() : 0;
++            LOG_DEBUG("module.bmp", "BMP ABANDON (opcode): player={} guidLow={} petNumber={}",
++                _player->GetName(), _player->GetGUID().GetCounter(), petNumber);
+             _player->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
+         }
+         else if (pet->GetGUID() == _player->GetCharmGUID())
+diff --git a/src/server/game/Spells/Spell.cpp b/src/server/game/Spells/Spell.cpp
+index 4a25b63..e911f52 100644
+--- a/src/server/game/Spells/Spell.cpp
++++ b/src/server/game/Spells/Spell.cpp
+@@ -22,6 +22,7 @@
+ #include "CharmInfo.h"
+ #include "CellImpl.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "ConditionMgr.h"
+ #include "DisableMgr.h"
+ #include "DynamicObject.h"
+@@ -3931,7 +3932,16 @@ void Spell::_cast(bool skipCheck)
+     {
+         if (unitCaster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))
+             if (Pet* pet = unitCaster->ToPlayer()->GetPet())
+-                unitCaster->ToPlayer()->RemovePet(pet, PET_SAVE_AS_CURRENT);
++            {
++                PetSaveMode mode = PET_SAVE_AS_CURRENT;
++                if (pet->IsHunterPet())
++                {
++                    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++                    if (allowMultipleUnslotted)
++                        mode = PET_SAVE_NOT_IN_SLOT;
++                }
++                unitCaster->ToPlayer()->RemovePet(pet, mode);
++            }
+ 
+         if (Unit* charm = unitCaster->GetCharm())
+             charm->RemoveAurasByType(SPELL_AURA_MOD_CHARM, unitCaster->GetGUID());
+diff --git a/src/server/game/Spells/SpellEffects.cpp b/src/server/game/Spells/SpellEffects.cpp
+index 351a5e3..6b93ca2 100644
+--- a/src/server/game/Spells/SpellEffects.cpp
++++ b/src/server/game/Spells/SpellEffects.cpp
+@@ -22,6 +22,7 @@
+ #include "CellImpl.h"
+ #include "Chat.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "Creature.h"
+ #include "DynamicObject.h"
+ #include "Formulas.h"
+@@ -3301,21 +3302,46 @@ void Spell::EffectTameCreature(SpellEffIndex /*effIndex*/)
+         return;
+ 
+     if (unitCaster->GetPetGUID())
++    {
++        if (m_caster->IsPlayer())
++            LOG_DEBUG("module.bmp", "BMP TAME FAIL: ALREADY_HAVE_PET player={} guidLow={}",
++                m_caster->GetName(), m_caster->GetGUID().GetCounter());
+         return;
++    }
+ 
+     if (!unitTarget)
++    {
++        if (m_caster->IsPlayer())
++            LOG_DEBUG("module.bmp", "BMP TAME FAIL: NO_TARGET player={} guidLow={}",
++                m_caster->GetName(), m_caster->GetGUID().GetCounter());
+         return;
++    }
+ 
+     if (!unitTarget->IsCreature())
++    {
++        if (m_caster->IsPlayer())
++            LOG_DEBUG("module.bmp", "BMP TAME FAIL: TARGET_NOT_CREATURE player={} guidLow={}",
++                m_caster->GetName(), m_caster->GetGUID().GetCounter());
+         return;
++    }
+ 
+     Creature* creatureTarget = unitTarget->ToCreature();
+ 
+     if (creatureTarget->IsPet())
++    {
++        if (m_caster->IsPlayer())
++            LOG_DEBUG("module.bmp", "BMP TAME FAIL: TARGET_IS_PET player={} guidLow={}",
++                m_caster->GetName(), m_caster->GetGUID().GetCounter());
+         return;
++    }
+ 
+     if (!unitCaster->IsClass(CLASS_HUNTER, CLASS_CONTEXT_PET))
++    {
++        if (m_caster->IsPlayer())
++            LOG_DEBUG("module.bmp", "BMP TAME FAIL: NOT_HUNTER player={} guidLow={}",
++                m_caster->GetName(), m_caster->GetGUID().GetCounter());
+         return;
++    }
+ 
+     // cast finish successfully
+     //SendChannelUpdate(0);
+@@ -3346,8 +3372,25 @@ void Spell::EffectTameCreature(SpellEffIndex /*effIndex*/)
+ 
+     if (unitCaster->IsPlayer())
+     {
++        ObjectGuid::LowType ownerLow = unitCaster->GetGUID().GetCounter();
++        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
++        LOG_DEBUG("module.bmp", "BMP TAME START: player={} guidLow={} targetEntry={} targetGuid={} activePetGuid={} tempUnsummoned={}",
++            unitCaster->GetName(), ownerLow, creatureTarget->GetEntry(), creatureTarget->GetGUID().GetCounter(),
++            unitCaster->GetPetGUID().GetCounter(), unitCaster->ToPlayer()->GetTemporaryUnsummonedPetNumber());
++        LOG_DEBUG("module.bmp", "BMP TAME SAVE: player={} guidLow={} newPetNumber={}",
++            unitCaster->GetName(), ownerLow, newPetNumber);
++        if (newPetNumber)
++            CharacterDatabase.Execute(
++                "UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}",
++                ownerLow, newPetNumber);
+         pet->SavePetToDB(PET_SAVE_AS_CURRENT);
+         unitCaster->ToPlayer()->PetSpellInitialize();
++        if (QueryResult q = CharacterDatabase.Query("SELECT COUNT(*), SUM(slot = 0), SUM(slot = 100) FROM character_pet WHERE owner = {}", ownerLow))
++        {
++            Field* f = q->Fetch();
++            LOG_DEBUG("module.bmp", "BMP TAME DB: owner={} total={} slot0={} slot100={}",
++                ownerLow, f[0].Get<uint64>(), f[1].Get<uint64>(), f[2].Get<uint64>());
++        }
+     }
+ }
+ 
+@@ -4759,6 +4802,12 @@ void Spell::EffectDismissPet(SpellEffIndex effIndex)
+         return;
+ 
+     Pet* pet = unitTarget->ToPet();
++    if (Player* owner = pet->GetOwner() ? pet->GetOwner()->ToPlayer() : nullptr)
++    {
++        uint32 petNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
++        LOG_DEBUG("module.bmp", "BMP DISMISS: player={} guidLow={} petNumber={}",
++            owner->GetName(), owner->GetGUID().GetCounter(), petNumber);
++    }
+ 
+     ExecuteLogEffectUnsummonObject(effIndex, pet);
+     pet->Remove(PET_SAVE_NOT_IN_SLOT);
+diff --git a/src/server/scripts/Spells/spell_hunter.cpp b/src/server/scripts/Spells/spell_hunter.cpp
+index ece1920..73c57b6 100644
+--- a/src/server/scripts/Spells/spell_hunter.cpp
++++ b/src/server/scripts/Spells/spell_hunter.cpp
+@@ -17,6 +17,8 @@
+ 
+ #include "Cell.h"
+ #include "CellImpl.h"
++#include "Config.h"
++#include "Log.h"
+ #include "GridNotifiers.h"
+ #include "Pet.h"
+ #include "SpellAuraEffects.h"
+@@ -1011,9 +1013,13 @@ class spell_hun_tame_beast : public SpellScript
+             return SPELL_FAILED_DONT_REPORT;
+ 
+         Player* player = GetCaster()->ToPlayer();
++        uint32 targetEntry = GetExplTargetUnit() ? GetExplTargetUnit()->GetEntry() : 0;
++        LOG_DEBUG("module.bmp", "BMP TAME CHECK START: player={} guidLow={} targetEntry={} activePetGuid={}",
++            player->GetName(), player->GetGUID().GetCounter(), targetEntry, player->GetPetGUID().GetCounter());
+ 
+         if (!GetExplTargetUnit())
+         {
++            LOG_DEBUG("module.bmp", "BMP TAME FAIL: INVALID_CREATURE player={} guidLow={}", player->GetName(), player->GetGUID().GetCounter());
+             player->SendTameFailure(PET_TAME_INVALID_CREATURE);
+             return SPELL_FAILED_DONT_REPORT;
+         }
+@@ -1022,18 +1028,21 @@ class spell_hun_tame_beast : public SpellScript
+         {
+             if (target->GetLevel() > player->GetLevel())
+             {
++                LOG_DEBUG("module.bmp", "BMP TAME FAIL: TOO_HIGHLEVEL player={} guidLow={}", player->GetName(), player->GetGUID().GetCounter());
+                 player->SendTameFailure(PET_TAME_TOO_HIGHLEVEL);
+                 return SPELL_FAILED_DONT_REPORT;
+             }
+ 
+             if (target->GetCreatureTemplate()->IsExotic() && !player->CanTameExoticPets())
+             {
++                LOG_DEBUG("module.bmp", "BMP TAME FAIL: CANT_CONTROL_EXOTIC player={} guidLow={}", player->GetName(), player->GetGUID().GetCounter());
+                 player->SendTameFailure(PET_TAME_CANT_CONTROL_EXOTIC);
+                 return SPELL_FAILED_DONT_REPORT;
+             }
+ 
+             if (!target->GetCreatureTemplate()->IsTameable(player->CanTameExoticPets()))
+             {
++                LOG_DEBUG("module.bmp", "BMP TAME FAIL: NOT_TAMEABLE player={} guidLow={}", player->GetName(), player->GetGUID().GetCounter());
+                 player->SendTameFailure(PET_TAME_NOT_TAMEABLE);
+                 return SPELL_FAILED_DONT_REPORT;
+             }
+@@ -1041,11 +1050,25 @@ class spell_hun_tame_beast : public SpellScript
+             PetStable const* petStable = player->GetPetStable();
+             if (petStable)
+             {
++                uint32 targetEntry = GetExplTargetUnit() ? GetExplTargetUnit()->GetEntry() : 0;
++                LOG_DEBUG("module.bmp", "BMP TAME CHECK: player={} guidLow={} targetEntry={} activePetGuid={} currentPet={} unslottedCount={}",
++                    player->GetName(), player->GetGUID().GetCounter(), targetEntry, player->GetPetGUID().GetCounter(),
++                    petStable->CurrentPet ? 1 : 0, petStable->UnslottedPets.size());
++                bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
+                 if (petStable->CurrentPet)
+-                    return SPELL_FAILED_ALREADY_HAVE_SUMMON;
++                {
++                    if (!allowMultipleUnslotted || player->GetPetGUID())
++                    {
++                        LOG_DEBUG("module.bmp", "BMP TAME BLOCKED: player={} guidLow={} allowMultiple={} currentPet=1 activePetGuid={}",
++                            player->GetName(), player->GetGUID().GetCounter(), allowMultipleUnslotted, player->GetPetGUID().GetCounter());
++                        return SPELL_FAILED_ALREADY_HAVE_SUMMON;
++                    }
++                }
+ 
+-                if (petStable->GetUnslottedHunterPet())
++                if (!allowMultipleUnslotted && petStable->GetUnslottedHunterPet())
+                 {
++                    LOG_DEBUG("module.bmp", "BMP TAME BLOCKED: player={} guidLow={} allowMultiple={} unslottedCount={}",
++                        player->GetName(), player->GetGUID().GetCounter(), allowMultipleUnslotted, petStable->UnslottedPets.size());
+                     caster->SendTameFailure(PET_TAME_TOO_MANY);
+                     return SPELL_FAILED_DONT_REPORT;
+                 }
+@@ -1053,18 +1076,21 @@ class spell_hun_tame_beast : public SpellScript
+ 
+             if (player->GetCharmGUID())
+             {
++                LOG_DEBUG("module.bmp", "BMP TAME FAIL: ANOTHER_SUMMON_ACTIVE player={} guidLow={}", player->GetName(), player->GetGUID().GetCounter());
+                 player->SendTameFailure(PET_TAME_ANOTHER_SUMMON_ACTIVE);
+                 return SPELL_FAILED_DONT_REPORT;
+             }
+ 
+             if (target->GetOwnerGUID())
+             {
++                LOG_DEBUG("module.bmp", "BMP TAME FAIL: CREATURE_ALREADY_OWNED player={} guidLow={}", player->GetName(), player->GetGUID().GetCounter());
+                 player->SendTameFailure(PET_TAME_CREATURE_ALREADY_OWNED);
+                 return SPELL_FAILED_DONT_REPORT;
+             }
+         }
+         else
+         {
++            LOG_DEBUG("module.bmp", "BMP TAME FAIL: INVALID_CREATURE player={} guidLow={}", player->GetName(), player->GetGUID().GetCounter());
+             player->SendTameFailure(PET_TAME_INVALID_CREATURE);
+             return SPELL_FAILED_DONT_REPORT;
+         }

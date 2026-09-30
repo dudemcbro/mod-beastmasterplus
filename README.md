@@ -43,8 +43,14 @@ once.
 
 ## Requirements
 
-- AzerothCore WotLK (3.3.5a). The core patch was checked against the
-  mod-playerbots fork of azerothcore-wotlk (commit 2d2a522, January 2026).
+- AzerothCore WotLK (3.3.5a). No custom core fork is needed: the core patch
+  and apply script bring their own changes. Tested on:
+  - [azerothcore-wotlk](https://github.com/azerothcore/azerothcore-wotlk)
+    `master` (commit 51c32b5, September 2026), where the patch applies as is;
+  - the [mod-playerbots fork](https://github.com/mod-playerbots/azerothcore-wotlk)
+    (`Playerbot` branch) and
+    [azerothcore-wotlk-playerbots-custom](https://github.com/dudemcbro/azerothcore-wotlk-playerbots-custom),
+    where the apply script makes the same changes with scripted edits.
 - bash, git, python3 and perl on the machine that applies the core patch.
 - The BeastmasterPlus client addon (see
   [Client addon installation](#client-addon-installation-required)).
@@ -70,11 +76,16 @@ once.
      routing and pet save changes) and performs the remaining core edits with
      scripted fallbacks. If a partial hook already exists, it adds only the
      missing pieces. It is safe to run more than once.
+   - At the end it checks that every core change is in place and prints
+     `BeastMasterPlus core changes are in place.` If your core's source
+     differs too much for an edit, it lists each `MISSING:` change and exits
+     with an error instead of leaving the core half patched. Apply those
+     changes by hand, using the patch file as the reference.
    - Use `--force` to re-apply after the core changed or the patch defaults
      were updated.
    - Besides the patch it edits these core files directly; review them with
      `git diff` afterwards: `Handlers/ChatHandler.cpp`,
-     `Handlers/PetHandler.cpp`, `Entities/Pet/Pet.cpp`, `Entities/Pet/Pet.h`,
+     `Handlers/PetHandler.cpp`, `Entities/Pet/Pet.cpp`,
      `Entities/Player/Player.cpp`, `Entities/Unit/Unit.cpp`,
      `Spells/Spell.cpp`, `Spells/SpellEffects.cpp`,
      `scripts/Spells/spell_hunter.cpp`, and `CharacterDatabase.cpp` /

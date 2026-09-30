@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- Works on stock AzerothCore: the core patch is now made against
+  azerothcore-wotlk `master`, and the apply script's scripted edits also
+  match current AzerothCore, which renamed `m_caster` to `unitCaster` in
+  `Spell::_cast` and `Spell::EffectTameCreature`. Before, the script skipped
+  those two edits there without saying so
+- apply-core-addon-hook.sh checks every core change at the end, lists any
+  that are missing and exits with an error
+- The core patch no longer declares `Pet::SavePetStateWithoutSlot()`, which
+  the module never used
 - The module only defines `AddonMessageRouter` when the core does not ship
   its own `AddonMessageRouter.h`, so cores that include it no longer get a
   second copy of the same functions

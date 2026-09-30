@@ -167,21 +167,6 @@ if pet_cpp.exists():
                     pet_cpp.write_text("\n".join(lines) + "\n")
 PY
 
-# Pet.h: ensure SavePetStateWithoutSlot declaration exists
-run_py <<'PY'
-from pathlib import Path
-
-pet_h = Path("src/server/game/Entities/Pet/Pet.h")
-if pet_h.exists():
-    lines = pet_h.read_text().splitlines()
-    if not any("SavePetStateWithoutSlot" in l for l in lines):
-        for i, line in enumerate(lines):
-            if "void SavePetToDB(PetSaveMode mode);" in line:
-                lines.insert(i + 1, "    void SavePetStateWithoutSlot();")
-                break
-        pet_h.write_text("\n".join(lines) + "\n")
-PY
-
 # Normalize spell_hunter.cpp tame check to allow multi-unslotted when no active pet
 run_py <<'PY'
 from pathlib import Path
@@ -277,27 +262,30 @@ if path.exists():
 
     text = "\n".join(lines)
     if "BeastMasterPlus.AllowMultipleUnslottedPets" not in text:
-        old = (
-            "        if (m_caster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))\n"
-            "            if (Pet* pet = m_caster->ToPlayer()->GetPet())\n"
-            "                m_caster->ToPlayer()->RemovePet(pet, PET_SAVE_AS_CURRENT);\n"
-        )
-        new = (
-            "        if (m_caster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))\n"
-            "            if (Pet* pet = m_caster->ToPlayer()->GetPet())\n"
-            "            {\n"
-            "                PetSaveMode mode = PET_SAVE_AS_CURRENT;\n"
-            "                if (pet->IsHunterPet())\n"
-            "                {\n"
-            "                    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);\n"
-            "                    if (allowMultipleUnslotted)\n"
-            "                        mode = PET_SAVE_NOT_IN_SLOT;\n"
-            "                }\n"
-            "                m_caster->ToPlayer()->RemovePet(pet, mode);\n"
-            "            }\n"
-        )
-        if old in text:
-            text = text.replace(old, new)
+        # Older cores use m_caster here, current AzerothCore uses unitCaster.
+        for caster in ("m_caster", "unitCaster"):
+            old = (
+                f"        if ({caster}->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))\n"
+                f"            if (Pet* pet = {caster}->ToPlayer()->GetPet())\n"
+                f"                {caster}->ToPlayer()->RemovePet(pet, PET_SAVE_AS_CURRENT);\n"
+            )
+            new = (
+                f"        if ({caster}->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))\n"
+                f"            if (Pet* pet = {caster}->ToPlayer()->GetPet())\n"
+                "            {\n"
+                "                PetSaveMode mode = PET_SAVE_AS_CURRENT;\n"
+                "                if (pet->IsHunterPet())\n"
+                "                {\n"
+                "                    bool allowMultipleUnslotted = sConfigMgr->GetOption<bool>(\"BeastMasterPlus.AllowMultipleUnslottedPets\", true);\n"
+                "                    if (allowMultipleUnslotted)\n"
+                "                        mode = PET_SAVE_NOT_IN_SLOT;\n"
+                "                }\n"
+                f"                {caster}->ToPlayer()->RemovePet(pet, mode);\n"
+                "            }\n"
+            )
+            if old in text:
+                text = text.replace(old, new)
+                break
 
     path.write_text(text + "\n")
 PY
@@ -440,18 +428,21 @@ tame_start = find_func("EffectTameCreature")
 if tame_start is not None:
     tb, te = find_block(tame_start)
     if tb is not None:
+        # Older cores use m_caster in this function, current AzerothCore uses unitCaster.
+        caster = "unitCaster" if "    if (unitCaster->IsPlayer())" in text[tb:te + 1] else "m_caster"
+
         # add early-return logs
-        logify_return("if (m_caster->GetPetGUID())", "ALREADY_HAVE_PET")
+        logify_return(f"if ({caster}->GetPetGUID())", "ALREADY_HAVE_PET")
         logify_return("if (!unitTarget)", "NO_TARGET")
         logify_return("if (!unitTarget->IsCreature())", "TARGET_NOT_CREATURE")
         logify_return("if (creatureTarget->IsPet())", "TARGET_IS_PET")
-        logify_return("if (!m_caster->IsClass(CLASS_HUNTER, CLASS_CONTEXT_PET))", "NOT_HUNTER")
+        logify_return(f"if (!{caster}->IsClass(CLASS_HUNTER, CLASS_CONTEXT_PET))", "NOT_HUNTER")
 
         # logify_return inserts lines, so recompute the function bounds before searching it again.
         tb, te = find_block(tame_start)
 
-        # find the if (m_caster->IsPlayer()) block within tame
-        marker = "    if (m_caster->IsPlayer())"
+        # find the if (<caster>->IsPlayer()) block within tame
+        marker = f"    if ({caster}->IsPlayer())"
         idx = None
         for i in range(tame_start, te + 1):
             if text[i] == marker:
@@ -473,21 +464,21 @@ if tame_start is not None:
                 block = "\n".join(text[idx:end + 1])
                 if "SavePetToDB(PET_SAVE_AS_CURRENT)" in block:
                     new_block = [
-                        "    if (m_caster->IsPlayer())",
+                        f"    if ({caster}->IsPlayer())",
                         "    {",
-                        "        ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();",
+                        f"        ObjectGuid::LowType ownerLow = {caster}->GetGUID().GetCounter();",
                         "        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
                         "        LOG_INFO(\"module.bmp\", \"BMP TAME START: player={} guidLow={} targetEntry={} targetGuid={} activePetGuid={} tempUnsummoned={}\",",
-                        "            m_caster->GetName(), ownerLow, creatureTarget->GetEntry(), creatureTarget->GetGUID().GetCounter(),",
-                        "            m_caster->GetPetGUID().GetCounter(), m_caster->ToPlayer()->GetTemporaryUnsummonedPetNumber());",
+                        f"            {caster}->GetName(), ownerLow, creatureTarget->GetEntry(), creatureTarget->GetGUID().GetCounter(),",
+                        f"            {caster}->GetPetGUID().GetCounter(), {caster}->ToPlayer()->GetTemporaryUnsummonedPetNumber());",
                         "        LOG_INFO(\"module.bmp\", \"BMP TAME SAVE: player={} guidLow={} newPetNumber={}\",",
-                        "            m_caster->GetName(), ownerLow, newPetNumber);",
+                        f"            {caster}->GetName(), ownerLow, newPetNumber);",
                         "        if (newPetNumber)",
                         "            CharacterDatabase.Execute(",
                         "                \"UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}\",",
                         "                ownerLow, newPetNumber);",
                         "        pet->SavePetToDB(PET_SAVE_AS_CURRENT);",
-                        "        m_caster->ToPlayer()->PetSpellInitialize();",
+                        f"        {caster}->ToPlayer()->PetSpellInitialize();",
                         "        if (QueryResult q = CharacterDatabase.Query(\"SELECT COUNT(*), SUM(slot = 0), SUM(slot = 100) FROM character_pet WHERE owner = {}\", ownerLow))",
                         "        {",
                         "            Field* f = q->Fetch();",
@@ -535,7 +526,9 @@ if path.exists():
     if tame_start is not None:
         tb, te = find_block(tame_start)
         if tb is not None:
-            marker = "    if (m_caster->IsPlayer())"
+            # Older cores use m_caster in this function, current AzerothCore uses unitCaster.
+            caster = "unitCaster" if "    if (unitCaster->IsPlayer())" in text[tb:te + 1] else "m_caster"
+            marker = f"    if ({caster}->IsPlayer())"
             idx = None
             for i in range(tame_start, te + 1):
                 if text[i] == marker:
@@ -556,21 +549,21 @@ if path.exists():
                     block = "\n".join(text[idx:end + 1])
                     if "UPDATE character_pet SET slot = 100" not in block:
                         new_block = [
-                            "    if (m_caster->IsPlayer())",
+                            f"    if ({caster}->IsPlayer())",
                             "    {",
-                            "        ObjectGuid::LowType ownerLow = m_caster->GetGUID().GetCounter();",
+                            f"        ObjectGuid::LowType ownerLow = {caster}->GetGUID().GetCounter();",
                             "        uint32 newPetNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;",
                             "        LOG_INFO(\"module.bmp\", \"BMP TAME START: player={} guidLow={} targetEntry={} targetGuid={} activePetGuid={} tempUnsummoned={}\",",
-                            "            m_caster->GetName(), ownerLow, creatureTarget->GetEntry(), creatureTarget->GetGUID().GetCounter(),",
-                            "            m_caster->GetPetGUID().GetCounter(), m_caster->ToPlayer()->GetTemporaryUnsummonedPetNumber());",
+                            f"            {caster}->GetName(), ownerLow, creatureTarget->GetEntry(), creatureTarget->GetGUID().GetCounter(),",
+                            f"            {caster}->GetPetGUID().GetCounter(), {caster}->ToPlayer()->GetTemporaryUnsummonedPetNumber());",
                             "        LOG_INFO(\"module.bmp\", \"BMP TAME SAVE: player={} guidLow={} newPetNumber={}\",",
-                            "            m_caster->GetName(), ownerLow, newPetNumber);",
+                            f"            {caster}->GetName(), ownerLow, newPetNumber);",
                             "        if (newPetNumber)",
                             "            CharacterDatabase.Execute(",
                             "                \"UPDATE character_pet SET slot = 100 WHERE owner = {} AND slot = 0 AND PetType = 1 AND id <> {}\",",
                             "                ownerLow, newPetNumber);",
                             "        pet->SavePetToDB(PET_SAVE_AS_CURRENT);",
-                            "        m_caster->ToPlayer()->PetSpellInitialize();",
+                            f"        {caster}->ToPlayer()->PetSpellInitialize();",
                             "        if (QueryResult q = CharacterDatabase.Query(\"SELECT COUNT(*), SUM(slot = 0), SUM(slot = 100) FROM character_pet WHERE owner = {}\", ownerLow))",
                             "        {",
                             "            Field* f = q->Fetch();",
@@ -879,6 +872,37 @@ for path in paths:
     if new_text != text:
         path.write_text(new_text)
 PY
+# Check that every core change is in place. The scripted edits look for exact core
+# source lines, so a core that changed those lines is reported here instead of being
+# left half patched.
+verify_core() {
+  local missing=0
+  check() {
+    if ! grep -Fq "$2" "$1" 2>/dev/null; then
+      echo "MISSING: $3 ($1)" >&2
+      missing=1
+    fi
+  }
+  check "$CORE_FILE" "AddonMessageRouter::Handle" "addon message hook"
+  check "$DB_FILE" "CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" "pet slot statement"
+  check "src/server/database/Database/Implementation/CharacterDatabase.cpp" "CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" "pet slot statement"
+  check "$PET_FILE" "CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" "keep dismissed pets when saving the active pet"
+  check "$HUNTER_FILE" "BeastMasterPlus.AllowMultipleUnslottedPets" "Tame Beast check"
+  check "$SPELL_FILE" "BeastMasterPlus.AllowMultipleUnslottedPets" "pet dismissed by a spell is kept"
+  check "$SPELL_EFFECTS_FILE" "UPDATE character_pet SET slot = 100" "tamed pet save"
+  check "src/server/game/Entities/Unit/Unit.cpp" "BeastMasterPlus.AllowMultipleUnslottedPets" "tamed pet setup"
+  check "src/server/game/Handlers/PetHandler.cpp" "BeastMasterPlus.AllowMultipleUnslottedPets" "abandon treated as dismiss"
+
+  if [ "$missing" -ne 0 ]; then
+    echo "ERROR: some BeastMasterPlus core changes could not be applied to this core." >&2
+    echo "Compare the files above with patches/core-beastmasterplus.normalized.patch and apply the missing changes by hand." >&2
+    return 1
+  fi
+
+  echo "BeastMasterPlus core changes are in place."
+  return 0
+}
+
 HOOK_PRESENT=0
 DECL_PRESENT=0
 PET_PATCH_PRESENT=0
@@ -888,19 +912,16 @@ SPELL_PATCH_PRESENT=0
 SPELL_EFFECTS_PATCH_PRESENT=0
 
 grep -Eq "AddonMessageRouter::Handle" "$CORE_FILE" && HOOK_PRESENT=1
-grep -Eq "namespace[[:space:]]+AddonMessageRouter" "$CORE_FILE" && DECL_PRESENT=1
-grep -Eq "SavePetStateWithoutSlot" src/server/game/Entities/Pet/Pet.h && PET_PATCH_PRESENT=1
+grep -Eq "namespace[[:space:]]+AddonMessageRouter|#include \"AddonMessageRouter\.h\"" "$CORE_FILE" && DECL_PRESENT=1
+grep -Eq "CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" "$PET_FILE" && PET_PATCH_PRESENT=1
 grep -Eq "CHAR_UPD_CHAR_PET_SLOT_BY_OWNER_EXCEPT" "$DB_FILE" && DB_PATCH_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$HUNTER_FILE" && TAME_PATCH_PRESENT=1
 grep -Eq "BeastMasterPlus.AllowMultipleUnslottedPets" "$SPELL_FILE" && SPELL_PATCH_PRESENT=1
-if [ -f "$SPELL_EFFECTS_FILE" ]; then
-  # After normalization, treat SpellEffects as patched
-  SPELL_EFFECTS_PATCH_PRESENT=1
-fi
+grep -Fq "UPDATE character_pet SET slot = 100" "$SPELL_EFFECTS_FILE" && SPELL_EFFECTS_PATCH_PRESENT=1
 
 if [ "$FORCE" -eq 0 ] && [ "$HOOK_PRESENT" -eq 1 ] && [ "$DECL_PRESENT" -eq 1 ] && [ "$PET_PATCH_PRESENT" -eq 1 ] && [ "$DB_PATCH_PRESENT" -eq 1 ] && [ "$TAME_PATCH_PRESENT" -eq 1 ] && [ "$SPELL_PATCH_PRESENT" -eq 1 ] && [ "$SPELL_EFFECTS_PATCH_PRESENT" -eq 1 ]; then
-  echo "BeastMasterPlus core patch already present. Skipping."
-  exit 0
+  verify_core
+  exit $?
 fi
 
 if [ "$HOOK_PRESENT" -eq 0 ] && [ "$PATCH_APPLIED" -eq 0 ]; then
@@ -1008,3 +1029,6 @@ if path.exists():
             break
 PY
 fi
+
+verify_core
+exit $?

@@ -3,3 +3,7 @@ build/
 *.swp
 *.swo
 *.log
+__pycache__/
+
+# Local config copies; only the .conf.dist template is tracked
+conf/*.conf

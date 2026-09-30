@@ -323,9 +323,9 @@ if hunter_cpp.exists():
 
     if "BMP TAME FAIL:" not in text:
         replacements = {
-            "            player->SendTameFailure(PET_TAME_TOO_HIGHLEVEL);":
-                "            LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: TOO_HIGHLEVEL player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
-                "            player->SendTameFailure(PET_TAME_TOO_HIGHLEVEL);",
+            "                player->SendTameFailure(PET_TAME_TOO_HIGHLEVEL);":
+                "                LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: TOO_HIGHLEVEL player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
+                "                player->SendTameFailure(PET_TAME_TOO_HIGHLEVEL);",
             "                player->SendTameFailure(PET_TAME_CANT_CONTROL_EXOTIC);":
                 "                LOG_INFO(\"module.bmp\", \"BMP TAME FAIL: CANT_CONTROL_EXOTIC player={} guidLow={}\", player->GetName(), player->GetGUID().GetCounter());\n"
                 "                player->SendTameFailure(PET_TAME_CANT_CONTROL_EXOTIC);",
@@ -446,6 +446,9 @@ if tame_start is not None:
         logify_return("if (!unitTarget->IsCreature())", "TARGET_NOT_CREATURE")
         logify_return("if (creatureTarget->IsPet())", "TARGET_IS_PET")
         logify_return("if (!m_caster->IsClass(CLASS_HUNTER, CLASS_CONTEXT_PET))", "NOT_HUNTER")
+
+        # logify_return inserts lines, so recompute the function bounds before searching it again.
+        tb, te = find_block(tame_start)
 
         # find the if (m_caster->IsPlayer()) block within tame
         marker = "    if (m_caster->IsPlayer())"
@@ -673,7 +676,11 @@ if player_cpp.exists():
 
     if (returnreagent"""
         if needle in text:
-            insert = """        if (pet->IsHunterPet())
+            # Keep the stock m_removed guard: dropping it lets RemovePet run twice on the same pet.
+            insert = """        if (pet->m_removed)
+            return;
+
+        if (pet->IsHunterPet())
         {
             uint32 petNumber = pet->GetCharmInfo() ? pet->GetCharmInfo()->GetPetNumber() : 0;
             LOG_INFO(\"module.bmp\", \"BMP RemovePet: player={} guidLow={} petNumber={} mode={} returnreagent={}\",
@@ -684,6 +691,21 @@ if player_cpp.exists():
     if (returnreagent"""
             text = text.replace(needle, insert)
             player_cpp.write_text(text)
+
+    # Repair trees patched by older versions of this script, which removed the m_removed guard.
+    text = player_cpp.read_text()
+    broken = """        LOG_DEBUG("entities.pet", "RemovePet {}, {}, {}", pet->GetEntry(), mode, returnreagent);
+        if (pet->IsHunterPet())
+"""
+    if broken in text:
+        fixed = """        LOG_DEBUG("entities.pet", "RemovePet {}, {}, {}", pet->GetEntry(), mode, returnreagent);
+        if (pet->m_removed)
+            return;
+
+        if (pet->IsHunterPet())
+"""
+        text = text.replace(broken, fixed)
+        player_cpp.write_text(text)
 
     text = player_cpp.read_text()
     if "BMP RemovePet (no active)" not in text:

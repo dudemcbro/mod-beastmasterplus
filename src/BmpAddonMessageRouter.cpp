@@ -1,5 +1,10 @@
 #include "BmpAddonMessageRouter.h"
 
+// Some cores ship their own AddonMessageRouter (src/server/game/Chat/AddonMessageRouter.cpp),
+// which already defines these functions. Only define them here for cores patched by
+// patches/apply-core-addon-hook.sh, which adds just a forward declaration of Handle().
+#if !__has_include("AddonMessageRouter.h")
+
 #include <vector>
 
 namespace AddonMessageRouter
@@ -23,3 +28,5 @@ namespace AddonMessageRouter
         return false;
     }
 }
+
+#endif

@@ -9,3 +9,36 @@
 # Default: 1 (enabled)
 #
 BeastMasterPlus.AllowMultipleUnslottedPets = 1
+
+#
+# Minimum time in seconds between two pet summons through the addon
+# (SUMMON request) for one player. 0 disables the cooldown.
+#
+# Default: 10
+#
+BeastMasterPlus.Summon.Cooldown = 10
+
+#
+# Allow summoning pets through the addon inside battlegrounds.
+# Summoning in arenas is always refused. Outside of these, a summon is also
+# refused while dead, in combat, mounted, on a flight path, in a vehicle or
+# while casting, and pets in a real stable slot (1-4) can only be taken out
+# near a stable master.
+#
+# Default: 0 (disabled)
+#
+BeastMasterPlus.Summon.AllowInBattleground = 0
+
+#
+# Rate limit for all addon requests (LIST, SUMMON, DISMISS, ...) of one
+# player: at most RequestLimit.Count requests per RequestLimit.Window
+# seconds. The core's addon flood limit (ChatFlood.AddonMessageCount) is
+# loose, a chat mute does not stop addon messages from reaching this module,
+# and several requests run database queries. Requests over the limit are
+# dropped and the addon is told once per window.
+# Set RequestLimit.Count to 0 to disable the limit.
+#
+# Default: 10 requests per 10 seconds
+#
+BeastMasterPlus.RequestLimit.Count = 10
+BeastMasterPlus.RequestLimit.Window = 10

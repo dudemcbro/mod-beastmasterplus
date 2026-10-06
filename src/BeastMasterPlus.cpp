@@ -792,20 +792,21 @@ namespace
             }
 
             std::string petName = activePet->GetName();
-            LOG_DEBUG("module.bmp", "BMP DISMISS REQ: player={} guidLow={} activePet={} requestedPet={}",
-                player->GetName(), player->GetGUID().GetCounter(), charm->GetPetNumber(), requestedPetNumber);
+            LOG_DEBUG("module.bmp", "BMP DISMISS REQ: player={} guid={} activePet={} requestedPet={}",
+                player->GetName(), player->GetGUID().ToString(), charm->GetPetNumber(), requestedPetNumber);
             player->RemovePet(activePet, PET_SAVE_NOT_IN_SLOT, false);
 
             // Diagnostic query, only run when debug logging is enabled.
+            ObjectGuid::LowType const ownerLowGuid = player->GetGUID().GetCounter();
             if (sLog->ShouldLog("module.bmp", LOG_LEVEL_DEBUG))
             {
                 if (QueryResult q = CharacterDatabase.Query(
                     "SELECT COUNT(*), SUM(slot = 0), SUM(slot = 100) FROM character_pet WHERE owner = {}",
-                    player->GetGUID().GetCounter()))
+                    ownerLowGuid))
                 {
                     Field* f = q->Fetch();
                     LOG_DEBUG("module.bmp", "BMP DISMISS DB: owner={} total={} slot0={} slot100={}",
-                        player->GetGUID().GetCounter(), f[0].Get<uint64>(), f[1].Get<uint64>(), f[2].Get<uint64>());
+                        player->GetGUID().ToString(), f[0].Get<uint64>(), f[1].Get<uint64>(), f[2].Get<uint64>());
                 }
             }
             SendBmp(session, "DISMISSED|" + SanitizeName(petName));

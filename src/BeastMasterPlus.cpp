@@ -829,21 +829,37 @@ public:
     }
 };
 
+namespace BmpRouter
+{
+    bool TryHandleAddon(WorldSession* session, std::string const& rawMsg);
+}
+
 class BmpPlayerScript : public PlayerScript
 {
 public:
-    BmpPlayerScript() : PlayerScript("BmpPlayerScript", { PLAYERHOOK_ON_LOGOUT }) { }
+    BmpPlayerScript() : PlayerScript("BmpPlayerScript", { PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT }) { }
 
     void OnPlayerLogout(Player* player) override
     {
         if (player)
             ForgetPlayer(player->GetGUID().GetCounter());
     }
+
+    // The addon whispers its requests to the player's own character. Handle them
+    // here and drop the whisper, so a stock core needs no chat patch.
+    bool OnPlayerCanUseChat(Player* player, uint32 type, uint32 language, std::string& msg, Player* receiver) override
+    {
+        if (!player || player != receiver || type != CHAT_MSG_WHISPER || language != LANG_ADDON)
+            return true;
+
+        return !BmpRouter::TryHandleAddon(player->GetSession(), msg);
+    }
 };
 
 namespace BmpRouter
 {
-    // This function is called by your core from ChatHandler.cpp when CHAT_MSG_ADDON is received.
+    // Called for the addon's whispers to self, from BmpPlayerScript on any core, and from
+    // AddonMessageRouter::Handle on cores patched by older versions of this module.
     bool TryHandleAddon(WorldSession* session, std::string const& rawMsg)
     {
         if (!session)

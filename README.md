@@ -15,8 +15,9 @@ client addon.
 - The extended storage does not use stable slots or stable master NPCs.
   Pets in the regular stable slots (1-4) still follow the core's stable
   rules, see [Summon rules](#summon-rules).
-- The module provides the `AddonMessageRouter` implementation when the core
-  does not ship one (the core patch only forward-declares it).
+- Addon requests arrive as whispers to the hunter's own character. The
+  module answers them through the core's existing chat hook, so the core
+  needs no chat changes.
 
 ## Summon rules
 
@@ -43,15 +44,11 @@ once.
 
 ## Requirements
 
-- AzerothCore WotLK (3.3.5a). No custom core fork is needed: the core patch
-  and apply script bring their own changes. Tested on:
-  - [azerothcore-wotlk](https://github.com/azerothcore/azerothcore-wotlk)
-    `master` (commit 51c32b5, September 2026), where the patch applies as is;
-  - the [mod-playerbots fork](https://github.com/mod-playerbots/azerothcore-wotlk)
-    (`Playerbot` branch) and
-    [azerothcore-wotlk-playerbots-custom](https://github.com/dudemcbro/azerothcore-wotlk-playerbots-custom),
-    where the apply script makes the same changes with scripted edits.
-- bash, git, python3 and perl on the machine that applies the core patch.
+- AzerothCore WotLK (3.3.5a) with the core patch in `patches/` (pet storage
+  only). It is made against
+  [azerothcore-wotlk](https://github.com/azerothcore/azerothcore-wotlk)
+  `master` (November 2026).
+- bash and git on the machine that applies the core patch.
 - The BeastmasterPlus client addon (see
   [Client addon installation](#client-addon-installation-required)).
 
@@ -69,33 +66,23 @@ once.
 
    ```sh
    cd <azerothcore>
-   modules/mod-beastmasterplus/patches/apply-core-addon-hook.sh
+   modules/mod-beastmasterplus/patches/apply-core-patch.sh
    ```
 
-   - It applies `patches/core-beastmasterplus.normalized.patch` (addon
-     routing and pet save changes) and performs the remaining core edits with
-     scripted fallbacks. If a partial hook already exists, it adds only the
-     missing pieces. It is safe to run more than once.
-   - At the end it checks that every core change is in place and prints
-     `BeastMasterPlus core changes are in place.` If your core's source
-     differs too much for an edit, it lists each `MISSING:` change and exits
-     with an error instead of leaving the core half patched. Apply those
-     changes by hand, using the patch file as the reference.
-   - Use `--force` to re-apply after the core changed or the patch defaults
-     were updated.
-   - Besides the patch it edits these core files directly; review them with
-     `git diff` afterwards: `Handlers/ChatHandler.cpp`,
-     `Handlers/PetHandler.cpp`, `Entities/Pet/Pet.cpp`,
-     `Entities/Player/Player.cpp`, `Entities/Unit/Unit.cpp`,
-     `Spells/Spell.cpp`, `Spells/SpellEffects.cpp`,
-     `scripts/Spells/spell_hunter.cpp`, and `CharacterDatabase.cpp` /
-     `CharacterDatabase.h` under `src/server/database/Database/Implementation/`.
-   - The `AddonMessageRouter` implementation is provided by this module in
-     `src/BmpAddonMessageRouter.h` and `src/BmpAddonMessageRouter.cpp`. Some
-     custom forks already ship their own `AddonMessageRouter.h` and `.cpp`
-     in `src/server/game/Chat/`. The module detects that header at compile
-     time and then leaves the definitions to the core, so exactly one copy
-     is built either way.
+   - It applies `patches/core-beastmasterplus.patch`, which lets a hunter
+     keep several pets out of the stable: taming no longer deletes them,
+     unsummoning keeps them, and abandoning from the pet bar dismisses the
+     pet instead. Every change reads
+     `BeastMasterPlus.AllowMultipleUnslottedPets` and is marked
+     `mod-beastmasterplus` in the source.
+   - It prints `APPLIED` the first time and `OK: already applied` after
+     that. If your core differs, it stops with an error and changes
+     nothing; apply the patch by hand using the file as the reference.
+   - Remove it again with
+     `git apply -R modules/mod-beastmasterplus/patches/core-beastmasterplus.patch`.
+   - Cores patched by older versions of this module call
+     `AddonMessageRouter::Handle` from `ChatHandler.cpp`. The module still
+     provides it, so those cores keep building.
 
 3. Re-run CMake and rebuild the core, for example:
 
@@ -178,8 +165,9 @@ git pull
 
 Then:
 
-1. Run `patches/apply-core-addon-hook.sh` again from the AzerothCore root
-   (with `--force` if the changelog says the patch changed).
+1. If the changelog says the core patch changed, revert the old one with
+   `git apply -R` (using the old file) and run `patches/apply-core-patch.sh`
+   from the AzerothCore root.
 2. Re-run CMake, rebuild and restart `worldserver`.
 3. Compare your `mod_beastmasterplus.conf` with the new
    `mod_beastmasterplus.conf.dist` and add any new options.
@@ -195,7 +183,7 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed.
 | `data/BeastmasterPlus/` | Required client addon (copy to `Interface/AddOns/BeastmasterPlus`) |
 | `conf/` | Module configuration template |
 | `sql/characters/` | Optional development seed data for the characters database |
-| `patches/` | Core patch and the script that applies it and performs the remaining core edits |
+| `patches/` | Core patch and the script that applies it |
 
 ## Contributing
 

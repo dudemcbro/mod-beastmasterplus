@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- Addon requests are handled through the core's existing whisper chat hook
+  (`OnPlayerCanUseChat`), so the core no longer needs a chat patch
+- The core patch is now `core-beastmasterplus.patch`, made against
+  azerothcore-wotlk `master` (November 2026). It only holds the pet storage
+  changes: no chat hook, no debug logging and no direct SQL in taming. It
+  reuses the core's own statement for moving pets out of the current slot.
+  Apply it with `apply-core-patch.sh`; the old `apply-core-addon-hook.sh`
+  and its scripted edits are gone. Cores with the old patch keep building,
+  because the module still provides `AddonMessageRouter`
 - Works on stock AzerothCore: the core patch is now made against
   azerothcore-wotlk `master`, and the apply script's scripted edits also
   match current AzerothCore, which renamed `m_caster` to `unitCaster` in

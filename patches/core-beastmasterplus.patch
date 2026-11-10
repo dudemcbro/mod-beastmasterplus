@@ -1,0 +1,136 @@
+diff --git a/src/server/game/Entities/Pet/Pet.cpp b/src/server/game/Entities/Pet/Pet.cpp
+index 95d965ddd..535e5ddbb 100644
+--- a/src/server/game/Entities/Pet/Pet.cpp
++++ b/src/server/game/Entities/Pet/Pet.cpp
+@@ -20,6 +20,7 @@
+ #include "ArenaSpectator.h"
+ #include "CharmInfo.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "DatabaseEnv.h"
+ #include "GameTime.h"
+ #include "Group.h"
+@@ -566,8 +567,11 @@ void Pet::SavePetToDB(PetSaveMode mode)
+         stmt->SetData(0, m_charmInfo->GetPetNumber());
+         trans->Append(stmt);
+ 
++        // mod-beastmasterplus: keep other unslotted hunter pets instead of deleting them
++        bool keepUnslotted = getPetType() == HUNTER_PET && sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++
+         // prevent existence another hunter pet in PET_SAVE_AS_CURRENT and PET_SAVE_NOT_IN_SLOT
+-        if (getPetType() == HUNTER_PET && (mode == PET_SAVE_AS_CURRENT || mode > PET_SAVE_LAST_STABLE_SLOT))
++        if (getPetType() == HUNTER_PET && !keepUnslotted && (mode == PET_SAVE_AS_CURRENT || mode > PET_SAVE_LAST_STABLE_SLOT))
+         {
+             stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_CHAR_PET_BY_SLOT);
+             stmt->SetData(0, ownerLowGUID);
+diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
+index 395179867..91f3eed99 100644
+--- a/src/server/game/Entities/Unit/Unit.cpp
++++ b/src/server/game/Entities/Unit/Unit.cpp
+@@ -30,6 +30,7 @@
+ #include "ChatTextBuilder.h"
+ #include "CombatPackets.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "ConditionMgr.h"
+ #include "Creature.h"
+ #include "CreatureAIImpl.h"
+@@ -13484,7 +13485,19 @@ bool Unit::InitTamedPet(Pet* pet, uint8 level, uint32 spell_id)
+ {
+     Player* player = ToPlayer();
+     PetStable& petStable = player->GetOrInitPetStable();
+-    if (petStable.CurrentPet || petStable.GetUnslottedHunterPet())
++    // mod-beastmasterplus: a pet out of the stable only blocks taming while it is summoned
++    if (sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true))
++    {
++        if (player->GetPetGUID())
++            return false;
++
++        if (petStable.CurrentPet)
++        {
++            petStable.UnslottedPets.push_back(std::move(*petStable.CurrentPet));
++            petStable.CurrentPet.reset();
++        }
++    }
++    else if (petStable.CurrentPet || petStable.GetUnslottedHunterPet())
+         return false;
+ 
+     pet->SetCreatorGUID(GetGUID());
+diff --git a/src/server/game/Handlers/PetHandler.cpp b/src/server/game/Handlers/PetHandler.cpp
+index 34f307007..18862ee9d 100644
+--- a/src/server/game/Handlers/PetHandler.cpp
++++ b/src/server/game/Handlers/PetHandler.cpp
+@@ -16,6 +16,7 @@
+  */
+ 
+ #include "Common.h"
++#include "Config.h"
+ #include "CharmInfo.h"
+ #include "CreatureAI.h"
+ #include "DisableMgr.h"
+@@ -285,7 +286,11 @@ void WorldSession::HandlePetActionHelper(Unit* pet, ObjectGuid guid1, uint32 spe
+                         if (pet->IsPet())
+                         {
+                             if (pet->ToPet()->getPetType() == HUNTER_PET)
+-                                GetPlayer()->RemovePet(pet->ToPet(), PET_SAVE_AS_DELETED);
++                            {
++                                // mod-beastmasterplus: abandoning from the pet bar dismisses the pet instead
++                                bool keepUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++                                GetPlayer()->RemovePet(pet->ToPet(), keepUnslotted ? PET_SAVE_NOT_IN_SLOT : PET_SAVE_AS_DELETED);
++                            }
+                             else
+                             {
+                                 pet->SendPetDismissSound();
+diff --git a/src/server/game/Spells/Spell.cpp b/src/server/game/Spells/Spell.cpp
+index ae9a74efc..5921e1a85 100644
+--- a/src/server/game/Spells/Spell.cpp
++++ b/src/server/game/Spells/Spell.cpp
+@@ -22,6 +22,7 @@
+ #include "CharmInfo.h"
+ #include "CellImpl.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "ConditionMgr.h"
+ #include "DisableMgr.h"
+ #include "DynamicObject.h"
+@@ -3952,7 +3953,11 @@ void Spell::_cast(bool skipCheck)
+     {
+         if (unitCaster->IsPlayer() && !m_spellInfo->HasEffect(SPELL_EFFECT_SUMMON_PET))
+             if (Pet* pet = unitCaster->ToPlayer()->GetPet())
+-                unitCaster->ToPlayer()->RemovePet(pet, PET_SAVE_AS_CURRENT);
++            {
++                // mod-beastmasterplus: unsummon the hunter pet out of the current slot
++                bool keepUnslotted = pet->IsHunterPet() && sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++                unitCaster->ToPlayer()->RemovePet(pet, keepUnslotted ? PET_SAVE_NOT_IN_SLOT : PET_SAVE_AS_CURRENT);
++            }
+ 
+         if (Unit* charm = unitCaster->GetCharm())
+             charm->RemoveAurasByType(SPELL_AURA_MOD_CHARM, unitCaster->GetGUID());
+diff --git a/src/server/scripts/Spells/spell_hunter.cpp b/src/server/scripts/Spells/spell_hunter.cpp
+index ece192038..ed59c1cc0 100644
+--- a/src/server/scripts/Spells/spell_hunter.cpp
++++ b/src/server/scripts/Spells/spell_hunter.cpp
+@@ -17,6 +17,7 @@
+ 
+ #include "Cell.h"
+ #include "CellImpl.h"
++#include "Config.h"
+ #include "GridNotifiers.h"
+ #include "Pet.h"
+ #include "SpellAuraEffects.h"
+@@ -1041,10 +1042,13 @@ class spell_hun_tame_beast : public SpellScript
+             PetStable const* petStable = player->GetPetStable();
+             if (petStable)
+             {
+-                if (petStable->CurrentPet)
++                // mod-beastmasterplus: pets out of the stable only block taming while one is summoned
++                bool keepUnslotted = sConfigMgr->GetOption<bool>("BeastMasterPlus.AllowMultipleUnslottedPets", true);
++
++                if (petStable->CurrentPet && (!keepUnslotted || player->GetPetGUID()))
+                     return SPELL_FAILED_ALREADY_HAVE_SUMMON;
+ 
+-                if (petStable->GetUnslottedHunterPet())
++                if (!keepUnslotted && petStable->GetUnslottedHunterPet())
+                 {
+                     caster->SendTameFailure(PET_TAME_TOO_MANY);
+                     return SPELL_FAILED_DONT_REPORT;
